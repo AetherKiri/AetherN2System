@@ -39,10 +39,11 @@ internal static class WellKnownSymbols
 
     private static string FixKnownTypos(string s)
     {
-        return s;
-        // TODO: check if N2S actually understands these
         return s switch
         {
+            "UnLock" => "Unlock",
+            "UnClickable" => "Erase",
+            "OverlayRender" => "AddRender",
             "Waitkey" => "WaitKey",
             "Wai" or "Wat" or "Waite" => "Wait",
             "Reqiest" => "Request",
