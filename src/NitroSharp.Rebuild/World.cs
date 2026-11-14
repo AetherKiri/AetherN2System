@@ -44,7 +44,14 @@ internal sealed class World : EntityScope
 
     public void DestroyEntity(Entity entity)
     {
-        entity.Disable();
+        if (entity.IsPendingDestruction) return;
+        entity.IsPendingDestruction = true;
+        foreach (Entity descendant in entity.DescendantsAndSelf())
+        {
+            descendant.IsPendingDestruction = true;
+            descendant.Disable();
+            descendant.Process.Aliases.Remove(descendant);
+        }
         if (entity.Parent is { } parent)
         {
             ((EntityInternal)parent).RemoveChild(entity);
@@ -82,7 +89,7 @@ internal sealed class World : EntityScope
 
         foreach (Entity entity in _newEntities)
         {
-            entity.Enable();
+            if (!entity.IsPendingDestruction) entity.Enable();
         }
 
         _deletedEntities.Clear();
@@ -96,7 +103,7 @@ internal sealed class World : EntityScope
             return null;
         }
 
-        parent ??= CurrentProcess.CurrentThread;
+        parent ??= CurrentProcess.CurrentThread.EntityContext;
         return parent.TryGetChild(name);
     }
 
@@ -116,12 +123,12 @@ internal sealed class World : EntityScope
         if (path.Parts is [var singlePart])
         {
             name = EntityName.Parse(singlePart.Value);
-            parent = CurrentProcess.CurrentThread;
+            parent = CurrentProcess.CurrentThread.EntityContext;
             return true;
         }
 
         ReadOnlySpan<EntityPathPart> remainingParts = path.Parts;
-        EntityScope scope = CurrentProcess.CurrentThread;
+        EntityScope scope = CurrentProcess.CurrentThread.EntityContext;
         var results = new SmallList<Entity>();
         while (remainingParts is [var currentPart, _, ..])
         {
@@ -141,7 +148,7 @@ internal sealed class World : EntityScope
 
     public SmallList<Entity> Query(in EntityQuery query)
     {
-        var lastResults = new SmallList<Entity>(CurrentProcess.CurrentThread ?? CurrentProcess.MainThread);
+        var lastResults = new SmallList<Entity>(CurrentProcess.CurrentThread.EntityContext);
         var currentResults = new SmallList<Entity>();
         foreach (EntityQueryPart queryPart in query.Parts)
         {
@@ -150,7 +157,7 @@ internal sealed class World : EntityScope
                 EntityScope scope = queryPart.Scope switch
                 {
                     EntityQueryScope.Current => entity,
-                    EntityQueryScope.MainThread => CurrentProcess.MainThread,
+                    EntityQueryScope.MainThread => CurrentProcess.MainThread.EntityContext,
                     EntityQueryScope.CurrentAliases => CurrentProcess.Aliases,
                     EntityQueryScope.AllAliases => this,
                     _ => throw ThrowHelper.UnexpectedValueOf<EntityQueryScope>()

@@ -10,6 +10,7 @@ internal partial struct Transform
     public Vector3 Position;
     public Vector3 Scale;
     public Vector3 Rotation;
+    public Vector2? Pivot;
 
     public static Transform Default => new() { Scale = Vector3.One };
 }

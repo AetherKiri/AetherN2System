@@ -18,6 +18,8 @@ public abstract class SourceReferenceResolver
     }
 
     public abstract SourceText ReadText(ResolvedPath path, Encoding? encoding);
+    public virtual SourceText ReadText(ResolvedPath path, Encoding? encoding, SourceTextDecodingOptions? decodingOptions)
+        => ReadText(path, encoding);
     public abstract long GetModificationTimestamp(ResolvedPath path);
 }
 
@@ -52,10 +54,13 @@ public sealed class DefaultSourceReferenceResolver(string rootDirectory) : Sourc
     }
 
     public override SourceText ReadText(ResolvedPath resolvedPath, Encoding? encoding)
+        => ReadText(resolvedPath, encoding, null);
+
+    public override SourceText ReadText(ResolvedPath resolvedPath, Encoding? encoding, SourceTextDecodingOptions? decodingOptions)
     {
         using (FileStream stream = File.OpenRead(resolvedPath.Value))
         {
-            return SourceText.From(stream, resolvedPath, encoding);
+            return SourceText.From(stream, resolvedPath, encoding, decodingOptions);
         }
     }
 

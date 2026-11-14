@@ -373,6 +373,8 @@ internal sealed class VideoShaderResources : IDisposable
     }
 }
 
+internal readonly record struct TransitionParameters(Vector4 Amounts, Vector4 Viewport);
+
 internal sealed class TransitionShaderResources : IDisposable
 {
     public TransitionShaderResources(
@@ -402,7 +404,7 @@ internal sealed class TransitionShaderResources : IDisposable
 
         ParamLayout = factory.CreateResourceLayout(new ResourceLayoutDescription(
             new ResourceLayoutElementDescription(
-                "FadeAmount",
+                "TransitionParameters",
                 ResourceKind.UniformBuffer,
                 ShaderStages.Fragment
             )
@@ -427,10 +429,10 @@ internal sealed class TransitionShaderResources : IDisposable
             outputDescription
         );
         Pipeline = factory.CreateGraphicsPipeline(in pipelineDesc);
-        ProgressBuffer = new GpuBuffer<Vector4>(
+        ProgressBuffer = new GpuBuffer<TransitionParameters>(
             graphicsDevice,
             BufferUsage.UniformBuffer,
-            data: Vector4.Zero
+            data: default
         );
     }
 
@@ -438,7 +440,7 @@ internal sealed class TransitionShaderResources : IDisposable
     public ResourceLayout ParamLayout { get; }
     public Pipeline Pipeline { get; }
 
-    public GpuBuffer<Vector4> ProgressBuffer { get; }
+    public GpuBuffer<TransitionParameters> ProgressBuffer { get; }
 
     public void Dispose()
     {
@@ -567,7 +569,7 @@ internal sealed class EffectShaderResources : IDisposable
             (Shader vs, Shader fs) = shaderLibrary.LoadShaderSet(shaderSetName);
             var shaderSetDesc = new ShaderSetDescription([], [vs, fs]);
             var pipelineDesc = new GraphicsPipelineDescription(
-                ShaderResources.PremultipliedAlpha,
+                shaderSetName == "boxblur" ? BlendStateDescription.SingleOverrideBlend : ShaderResources.PremultipliedAlpha,
                 DepthStencilStateDescription.Disabled,
                 RasterizerStateDescription.CullNone,
                 PrimitiveTopology.TriangleStrip,

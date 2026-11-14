@@ -254,9 +254,17 @@ internal sealed class GameContext : IDisposable
 
         if (Directory.Exists(Path.Combine(HostAssetsDirectory, "Fonts")))
         {
-            await glyphRasterizer.AddFontsAsync(
-                Directory.EnumerateFiles(Path.Combine(HostAssetsDirectory, "Fonts"))
-            );
+            var bundledFaces = new List<FontFaceKey>();
+            foreach (string path in Directory.EnumerateFiles(Path.Combine(HostAssetsDirectory, "Fonts"))
+                .OrderBy(path => path, StringComparer.Ordinal))
+            {
+                bundledFaces.AddRange(await glyphRasterizer.AddFontAsync(path));
+            }
+            if (!gameProfile.HasExplicitFontFamily)
+                defaultFontSettings = defaultFontSettings with
+                {
+                    DefaultFont = glyphRasterizer.SelectDefaultFont(defaultFont, bundledFaces)
+                };
         }
 
         return (glyphRasterizer, defaultFontSettings);
@@ -373,6 +381,16 @@ internal sealed class GameContext : IDisposable
         string bytecodeCacheDir = tempDir.FullName;
 
         string globalsPath = Path.Combine(bytecodeCacheDir, globalsFileName);
+        Encoding? sourceEncoding = null;
+        if (gameProfile.ScriptEncoding is { } scriptEncoding)
+            sourceEncoding = Encoding.GetEncoding(scriptEncoding);
+        else if (!gameProfile.DetectEncoding)
+            sourceEncoding = gameProfile.UseUtf8 ? Encoding.UTF8 : SourceText.DefaultEncoding;
+        SourceTextDecodingOptions? decodingOptions = gameProfile.DialogueEncoding is { } dialogueEncoding
+            ? new SourceTextDecodingOptions(Encoding.GetEncoding(dialogueEncoding),
+                (gameProfile.DialogueVariables ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal))
+            : null;
+
         if (gameProfile.SkipUpToDateCheck || !File.Exists(globalsPath))
         {
             if (!Directory.Exists(bytecodeCacheDir))
@@ -393,14 +411,6 @@ internal sealed class GameContext : IDisposable
                 {
                     File.Delete(file);
                 }
-            }
-
-            Encoding? sourceEncoding = null;
-            if (gameProfile.ScriptEncoding is { } scriptEncoding)
-                sourceEncoding = Encoding.GetEncoding(scriptEncoding);
-            else if (!gameProfile.DetectEncoding)
-            {
-                sourceEncoding = gameProfile.UseUtf8 ? Encoding.UTF8 : SourceText.DefaultEncoding;
             }
 
             SystemScripts sysScripts = gameProfile.SysScripts;
@@ -427,7 +437,7 @@ internal sealed class GameContext : IDisposable
             TimeSpan compilationTime;
             using (TimingScope.Start(out compilationTime))
             {
-                var compilation = new Compilation(nssFolder, sourceEncoding);
+                var compilation = new Compilation(nssFolder, sourceEncoding, decodingOptions);
                 SourceModuleSymbol[] modules = existingModules
                     .Select(compilation.GetSourceModule)
                     .ToArray();
@@ -442,7 +452,7 @@ internal sealed class GameContext : IDisposable
             log.Info("Bytecode cache is up-to-date.");
         }
 
-        var nsxLocator = new FileSystemNsxModuleLocator(bytecodeCacheDir, nssFolder);
+        var nsxLocator = new FileSystemNsxModuleLocator(bytecodeCacheDir, nssFolder, sourceEncoding, decodingOptions);
         var vm = new NsScriptVM(nsxLocator, File.OpenRead(globalsPath));
         string moduleName = Path.ChangeExtension(gameProfile.SysScripts.Startup, null);
         NsScriptThreadState mainThread = vm.CreateThread(moduleName, "main")!.Value;

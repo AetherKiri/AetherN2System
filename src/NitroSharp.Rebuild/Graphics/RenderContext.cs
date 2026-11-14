@@ -29,10 +29,13 @@ namespace NitroSharp.Graphics
 
         private readonly CommandList _drawCommands;
         private readonly CommandList _secondaryCommandList;
+        private readonly CommandList _captureCommands;
 
         private readonly Swapchain? _mainSwapchain;
         private readonly RenderTarget _swapchainTarget;
+        private readonly RenderTarget _presentedTarget;
         private readonly DrawBatch _offscreenBatch;
+        private bool _captureFrame;
 
         private readonly TextureCache _textureCache;
 
@@ -58,6 +61,7 @@ namespace NitroSharp.Graphics
             _shaderLibrary = new ShaderLibrary(graphicsDevice);
 
             _swapchainTarget = swapchain is null ? new RenderTarget(graphicsDevice, window.Size) : RenderTarget.Swapchain(graphicsDevice, swapchain.Framebuffer);
+            _presentedTarget = new RenderTarget(graphicsDevice, _swapchainTarget.Size, _swapchainTarget.ColorTarget.Format);
             OffscreenTarget = new RenderTarget(graphicsDevice, _swapchainTarget.Size);
             OffscreenTexturePool = new ResourcePool<Texture>(CreateOffscreenTexture, initialSize: 4);
 
@@ -67,6 +71,13 @@ namespace NitroSharp.Graphics
             _drawCommands.Name = "Draw commands (primary)";
             _secondaryCommandList = ResourceFactory.CreateCommandList();
             _secondaryCommandList.Name = "Secondary";
+            _captureCommands = ResourceFactory.CreateCommandList();
+            _captureCommands.Name = "Screen capture";
+            _captureCommands.Begin();
+            _captureCommands.SetFramebuffer(_presentedTarget.Framebuffer);
+            _captureCommands.ClearColorTarget(0, RgbaFloat.Black);
+            _captureCommands.End();
+            graphicsDevice.SubmitCommands(_captureCommands);
             CommandListPool = new ResourcePool<CommandList>(ResourceFactory.CreateCommandList, initialSize: 2);
 
             double scaledDesignArea = Math.Min(
@@ -285,6 +296,7 @@ namespace NitroSharp.Graphics
 
         public void BeginFrame(in FrameStamp frameStamp, RenderTarget renderTarget)
         {
+            _captureFrame = ReferenceEquals(renderTarget, _swapchainTarget);
             _drawCommands.Begin();
             MainBatch.Begin(_drawCommands, renderTarget);
 
@@ -325,6 +337,8 @@ namespace NitroSharp.Graphics
         public void EndFrame()
         {
             MainBatch.End();
+            if (_captureFrame)
+                _drawCommands.CopyTexture(_swapchainTarget.ColorTarget, _presentedTarget.ColorTarget);
 
             _secondaryCommandList.End();
             _drawCommands.End();
@@ -343,6 +357,41 @@ namespace NitroSharp.Graphics
             GraphicsDevice.SubmitCommands(TransferCommands);
             GraphicsDevice.SubmitCommands(_secondaryCommandList);
             GraphicsDevice.SubmitCommands(_drawCommands);
+        }
+
+        public SpriteTexture CapturePresentedFrame(DesignRectU? sourceRectangle = null)
+        {
+            Texture source = _presentedTarget.ColorTarget;
+            // Keep only the game viewport. Preserve fractional viewport boundaries in
+            // UVs so replaying a snapshot does not introduce bars or shift source crops.
+            uint left = (uint)MathF.Floor(ViewportLeft);
+            uint top = (uint)MathF.Floor(ViewportTop);
+            uint width = (uint)MathF.Ceiling(ViewportRight) - left;
+            uint height = (uint)MathF.Ceiling(ViewportBottom) - top;
+            var uvOrigin = new Vector2((ViewportLeft - left) / width, (ViewportTop - top) / height);
+            var uvExtent = new Vector2((ViewportRight - ViewportLeft) / width, (ViewportBottom - ViewportTop) / height);
+            Texture snapshot = ResourceFactory.CreateTexture(TextureDescription.Texture2D(
+                width, height, mipLevels: 1, arrayLayers: 1,
+                source.Format, TextureUsage.Sampled
+            ));
+            try
+            {
+                // Script execution happens while the next draw list is being recorded.
+                // Submit this copy separately so it observes the last completed frame.
+                _captureCommands.Begin();
+                _captureCommands.CopyTexture(
+                    source, left, top, 0, 0, 0,
+                    snapshot, 0, 0, 0, 0, 0,
+                    width, height, 1, 1);
+                _captureCommands.End();
+                GraphicsDevice.SubmitCommands(_captureCommands);
+                return SpriteTexture.FromOwnedTexture(snapshot, DesignResolution, sourceRectangle, uvOrigin, uvExtent);
+            }
+            catch
+            {
+                snapshot.Dispose();
+                throw;
+            }
         }
 
         public unsafe void CopyRgba(Span<byte> destination)
@@ -386,14 +435,18 @@ namespace NitroSharp.Graphics
         }
 
         public Matrix4x4 GetTransformMatrix(Transform transform, DesignSize size, bool useScaling, bool aligned)
+            => CreateTransformMatrix(transform, size, RenderScale, new Vector2(ViewportLeft, ViewportTop), useScaling, aligned);
+
+        internal static Matrix4x4 CreateTransformMatrix(Transform transform, DesignSize size, float renderScale,
+            Vector2 viewportOffset, bool useScaling, bool aligned)
         {
             var bounds = size.ToVector2();
-            var center = new Vector3(new Vector2(0.5f) * bounds, 0);
+            var center = new Vector3((transform.Pivot ?? new Vector2(0.5f) * bounds) * (useScaling ? renderScale : 1), 0);
             var scale = Matrix4x4.CreateScale(transform.Scale, center);
             Matrix4x4 rot = Matrix4x4.CreateRotationZ(rad(transform.Rotation.Z), center)
                 * Matrix4x4.CreateRotationY(rad(transform.Rotation.Y), center)
                 * Matrix4x4.CreateRotationX(rad(transform.Rotation.X), center);
-            Vector3 finalPosition = new Vector3(ViewportLeft, ViewportTop, 0) + transform.Position * RenderScale;
+            Vector3 finalPosition = new Vector3(viewportOffset, 0) + transform.Position * renderScale;
             if (aligned)
             {
                 finalPosition = new Vector3(
@@ -406,7 +459,7 @@ namespace NitroSharp.Graphics
             Matrix4x4 matrix = scale * rot * translation;
             if (useScaling)
             {
-                matrix = Matrix4x4.CreateScale(RenderScale) * matrix;
+                matrix = Matrix4x4.CreateScale(renderScale) * matrix;
             }
             return matrix;
 
@@ -421,6 +474,7 @@ namespace NitroSharp.Graphics
             TransferCommands.Dispose();
             _drawCommands.Dispose();
             _secondaryCommandList.Dispose();
+            _captureCommands.Dispose();
             CommandListPool.Dispose();
             ShaderResources.Dispose();
             WhiteTexture.Dispose();
@@ -433,6 +487,7 @@ namespace NitroSharp.Graphics
             _textureCache.Dispose();
             ResourceSetCache.Dispose();
             _swapchainTarget.Dispose();
+            _presentedTarget.Dispose();
             OffscreenTarget.Dispose();
             OffscreenTexturePool.Dispose();
             _shaderLibrary.Dispose();

@@ -527,6 +527,14 @@ namespace NitroSharp.NsScript.Syntax
             else
             {
                 leftOperand = ParseTerm();
+                while (_currentToken.Kind == SyntaxTokenKind.OpenBracket)
+                {
+                    EatToken();
+                    Expression index = ParseExpression();
+                    SyntaxToken close = EatToken(SyntaxTokenKind.CloseBracket);
+                    leftOperand = new IndexExpression(leftOperand, index,
+                        TextSpan.FromBounds(leftOperand.Span.Start, close.TextSpan.End));
+                }
             }
 
             while (true)
@@ -614,6 +622,7 @@ namespace NitroSharp.NsScript.Syntax
                     {
                         // Avoid eating tokens that are likely to be handled elsewhere
                         case SyntaxTokenKind.CloseParen:
+                        case SyntaxTokenKind.CloseBracket:
                         case SyntaxTokenKind.CloseBrace:
                         case SyntaxTokenKind.Comma:
                             return result;
@@ -767,12 +776,12 @@ namespace NitroSharp.NsScript.Syntax
         private FunctionCallExpression ParseFunctionCall()
         {
             Spanned<string> targetName = ParseIdentifier();
-            ImmutableArray<Expression> args = ParseArgumentList();
+            ImmutableArray<Expression> args = ParseArgumentList(targetName.Value == "VariableValue");
             var span = TextSpan.FromBounds(targetName.Span.Start, LexerPosition);
             return new FunctionCallExpression(targetName, args, span);
         }
 
-        private ImmutableArray<Expression> ParseArgumentList()
+        private ImmutableArray<Expression> ParseArgumentList(bool allowGlobalSigil = false)
         {
             if (SyntaxFacts.IsStatementTerminator(_currentToken.Kind))
             {
@@ -791,7 +800,12 @@ namespace NitroSharp.NsScript.Syntax
                    or SyntaxTokenKind.Semicolon
                    or SyntaxTokenKind.EndOfFile))
             {
-                if (SyntaxFacts.CanStartExpressionTerm(tk))
+                if (allowGlobalSigil && arguments.Count == 0 && tk is SyntaxTokenKind.Dollar or SyntaxTokenKind.Hash)
+                {
+                    SyntaxToken sigil = EatToken();
+                    arguments.Add(new LiteralExpression(ConstantValue.String(tk == SyntaxTokenKind.Dollar ? "$" : "#"), sigil.TextSpan));
+                }
+                else if (SyntaxFacts.CanStartExpressionTerm(tk))
                 {
                     Expression arg = ParseExpression();
                     arguments.Add(arg);
@@ -876,16 +890,25 @@ namespace NitroSharp.NsScript.Syntax
         private SelectSection ParseSelectSection()
         {
             SyntaxToken keyword = EatToken(SyntaxTokenKind.CaseKeyword);
-            Spanned<string> labelName = ConsumeTextUntil(
-                tk => tk is SyntaxTokenKind.OpenBrace or SyntaxTokenKind.Colon
-            );
+            Expression? labelExpression = null;
+            Spanned<string> labelName;
+            if (_currentToken.GetSigil() != SigilKind.None
+                || _currentToken.Kind is SyntaxTokenKind.StringLiteralOrQuotedIdentifier or SyntaxTokenKind.OpenParen
+                || _currentToken.Kind == SyntaxTokenKind.Identifier && PeekToken(1).Kind == SyntaxTokenKind.OpenParen)
+            {
+                int labelStart = LexerPosition;
+                labelExpression = ParseExpression();
+                TextSpan labelSpan = TextSpan.FromBounds(labelStart, Tokens[_tokenIndex - 1].TextSpan.End);
+                labelName = new Spanned<string>(SourceText.GetText(labelSpan), labelSpan);
+            }
+            else labelName = ConsumeTextUntil(tk => tk is SyntaxTokenKind.OpenBrace or SyntaxTokenKind.Colon);
             if (_currentToken.Kind == SyntaxTokenKind.Colon)
             {
                 EatToken();
             }
 
             Block body = ParseBlock();
-            return new SelectSection(labelName, body, SpanFrom(keyword));
+            return new SelectSection(labelName, body, SpanFrom(keyword), labelExpression);
         }
 
         private CallChapterStatement ParseCallChapterStatement()
@@ -899,34 +922,53 @@ namespace NitroSharp.NsScript.Syntax
         private CallSceneStatement ParseCallSceneStatement()
         {
             SyntaxToken keyword = EatToken(SyntaxTokenKind.CallSceneKeyword);
-            (Spanned<string>? file, Spanned<string> scene) = ParseSymbolPath();
+            bool local = TryEatToken(SyntaxTokenKind.AtArrow);
+            if (IsDynamicSceneTarget())
+            {
+                Expression target = ParseExpression();
+                if (TryEatToken(SyntaxTokenKind.Arrow))
+                    target = JoinScenePath(target, ParseSceneName());
+                else if (local)
+                    target = JoinScenePath(new LiteralExpression(ConstantValue.String("@"), keyword.TextSpan), target);
+                EatStatementTerminator();
+                return new CallSceneStatement(target, SpanFrom(keyword));
+            }
+
+            Spanned<string> part = ConsumeTextUntil(tk => tk is SyntaxTokenKind.Semicolon or SyntaxTokenKind.Arrow);
+            Spanned<string>? file = null;
+            Spanned<string> scene = part;
+            if (TryEatToken(SyntaxTokenKind.Arrow))
+            {
+                if (IsDynamicSceneTarget())
+                {
+                    Expression target = JoinScenePath(new LiteralExpression(ConstantValue.String(part.Value), part.Span), ParseExpression());
+                    EatStatementTerminator();
+                    return new CallSceneStatement(target, SpanFrom(keyword));
+                }
+                file = part;
+                scene = ConsumeTextUntil(tk => tk == SyntaxTokenKind.Semicolon);
+            }
             EatStatementTerminator();
             return new CallSceneStatement(file, scene, SpanFrom(keyword));
         }
 
-        // Parses call_scene specific symbol path syntax.
-        // call_scene can be followed by either '@->{localSymbolName}' (e.g. '@->SelectStoryModeA')
-        // or '{filepath}->{symbolName}' (e.g. 'nss/extra_gallery.nss->extra_gallery_main').
-        private (Spanned<string>? filePath, Spanned<string> symbolName) ParseSymbolPath()
+        private bool IsDynamicSceneTarget()
+            => _currentToken.GetSigil() != SigilKind.None
+                || _currentToken.Kind is SyntaxTokenKind.StringLiteralOrQuotedIdentifier or SyntaxTokenKind.OpenParen;
+
+        private Expression ParseSceneName()
         {
-            TryEatToken(SyntaxTokenKind.AtArrow);
+            if (IsDynamicSceneTarget()) return ParseExpression();
+            Spanned<string> name = ConsumeTextUntil(tk => tk == SyntaxTokenKind.Semicolon);
+            return new LiteralExpression(ConstantValue.String(name.Value), name.Span);
+        }
 
-            Spanned<string>? filePath = null;
-            Spanned<string> symbolName;
-            Spanned<string> part = ConsumeTextUntil(
-                tk => tk is SyntaxTokenKind.Semicolon or SyntaxTokenKind.Arrow
-            );
-            if (TryEatToken(SyntaxTokenKind.Arrow))
-            {
-                filePath = part;
-                symbolName = ConsumeTextUntil(tk => tk == SyntaxTokenKind.Semicolon);
-            }
-            else
-            {
-                symbolName = part;
-            }
-
-            return (filePath, symbolName);
+        private static Expression JoinScenePath(Expression module, Expression scene)
+        {
+            var separator = new LiteralExpression(ConstantValue.String("->"), module.Span);
+            var op = new Spanned<BinaryOperatorKind>(BinaryOperatorKind.Add, module.Span);
+            return new BinaryExpression(new BinaryExpression(module, op, separator, module.Span), op, scene,
+                TextSpan.FromBounds(module.Span.Start, scene.Span.End));
         }
 
         // Consumes tokens until the specified condition is met.

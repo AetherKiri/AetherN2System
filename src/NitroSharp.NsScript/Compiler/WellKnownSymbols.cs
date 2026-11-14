@@ -21,6 +21,8 @@ internal static class WellKnownSymbols
         {
             s_builtInConstants[enumValue.ToString()] = enumValue;
         }
+        s_builtInConstants["Clickable"] = BuiltInConstant.Enter;
+        s_builtInConstants["UnClickable"] = BuiltInConstant.Erase;
     }
 
     public static BuiltInFunction? LookupBuiltInFunction(string name)

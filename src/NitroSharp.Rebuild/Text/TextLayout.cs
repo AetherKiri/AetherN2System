@@ -131,64 +131,41 @@ namespace NitroSharp.Text
                     {
                         glyphPos.Y -= line.VerticalMetrics.Ascender + rubyTextOffset;
                     }
-                    _glyphs.Add(new PositionedGlyph(glyph.GlyphIndex, glyph.IsWhitespace, glyphPos));
+                    _glyphs.Add(new PositionedGlyph(glyph.GlyphIndex, glyph.IsWhitespace, glyphPos, glyph.Scalar));
                     _opacityValues.Add(1.0f);
 
                     bool endGlyphRun = pos > 0
                         && (glyph.TextRunIndex != lastRunIndex || glyph.Kind != lastCharKind);
-                    if (!endGlyphRun)
+                    if (lastRun is null || endGlyphRun)
                     {
-                        runLength++;
-                    }
-                    if (endGlyphRun || pos == line.GlyphSpan.End.Value - 1)
-                    {
-                        (int runIndex, CharacterKind kind) = endGlyphRun
-                            ? ((int)lastRunIndex, lastCharKind)
-                            : ((int)glyph.TextRunIndex, glyph.Kind);
-                        ref readonly TextRun textRun = ref textRuns[runIndex];
-                        PtFontSize fontSize = kind == CharacterKind.RubyText
+                        if (lastRun.HasValue) AddGlyphRun(lastRun.Value, appendStart);
+                        runStart = pos;
+                        runLength = 0;
+                        ref readonly TextRun textRun = ref textRuns[(int)glyph.TextRunIndex];
+                        PtFontSize fontSize = glyph.Kind == CharacterKind.RubyText
                             ? new PtFontSize((uint)(textRun.FontSize.Value * _rubyFontSizeMultiplier))
                             : textRun.FontSize;
-
                         GlyphRunFlags flags = textRun.DrawOutline
                             ? GlyphRunFlags.Outline
                             : GlyphRunFlags.None;
-                        if (lastCharKind == CharacterKind.RubyBase)
-                        {
+                        if (glyph.Kind == CharacterKind.RubyBase)
                             flags |= GlyphRunFlags.RubyBase;
-                        }
-                        else if (lastCharKind == CharacterKind.RubyText)
+                        else if (glyph.Kind == CharacterKind.RubyText)
                         {
                             flags |= GlyphRunFlags.RubyText;
                             flags &= ~GlyphRunFlags.Outline;
                         }
-
-                        if (lastRun is null)
+                        lastRun = new GlyphRun
                         {
-                            lastRun = new GlyphRun
-                            {
-                                Font = textRun.Font,
-                                FontSize = fontSize,
-                                Color = textRun.Color,
-                                OutlineColor = textRun.OutlineColor,
-                                Flags = flags,
-                                GlyphSpan = new Range(runStart, runStart + runLength)
-                            };
-                        }
-                        else
-                        {
-                            lastRun = lastRun.Value
-                                .WithSpan(new Range(runStart, runStart + runLength));
-                        }
-
-                        if (endGlyphRun)
-                        {
-                            AddGlyphRun(lastRun.Value, appendStart);
-                            runStart = pos;
-                            runLength = 1;
-                            lastRun = null;
-                        }
+                            Font = textRun.Font,
+                            FontSize = fontSize,
+                            Color = textRun.Color,
+                            OutlineColor = textRun.OutlineColor,
+                            Flags = flags
+                        };
                     }
+                    runLength++;
+                    lastRun = lastRun.Value.WithSpan(new Range(runStart, runStart + runLength));
 
                     pos++;
                     lastCharKind = glyph.Kind;
@@ -302,16 +279,18 @@ namespace NitroSharp.Text
         public readonly uint Index;
         private readonly GlyphFlags Flags;
         public readonly Vector2 Position;
+        public readonly Rune Scalar;
 
-        private PositionedGlyph(uint index, GlyphFlags flags, Vector2 position)
+        private PositionedGlyph(uint index, GlyphFlags flags, Vector2 position, Rune scalar)
         {
             Index = index;
             Flags = flags;
             Position = position;
+            Scalar = scalar;
         }
 
-        public PositionedGlyph(uint index, bool isWhitespace, Vector2 position)
-            : this(index, isWhitespace ? GlyphFlags.Whitespace : GlyphFlags.None, position)
+        public PositionedGlyph(uint index, bool isWhitespace, Vector2 position, Rune scalar = default)
+            : this(index, isWhitespace ? GlyphFlags.Whitespace : GlyphFlags.None, position, scalar)
         {
         }
 
@@ -432,6 +411,7 @@ namespace NitroSharp.Text
         public CharacterKind Kind { get; init; }
         public uint TextRunIndex { get; init; }
         public uint GlyphIndex { get; init; }
+        public Rune Scalar { get; init; }
         public Vector2 Position;
         public bool IsWhitespace { get; init; }
     }
@@ -590,6 +570,7 @@ namespace NitroSharp.Text
                         Kind = c.Kind,
                         TextRunIndex = c.TextRun,
                         GlyphIndex = c.GlyphIndex,
+                        Scalar = c.Scalar,
                         Position = new Vector2(caret + dimensions.Left, -dimensions.Top),
                         IsWhitespace = Rune.IsWhiteSpace(c.Scalar)
                     };
@@ -684,6 +665,7 @@ namespace NitroSharp.Text
                     {
                         TextRunIndex = c.TextRun,
                         GlyphIndex = c.GlyphIndex,
+                        Scalar = c.Scalar,
                         Position = position,
                         Kind = CharacterKind.RubyText,
                         IsWhitespace = Rune.IsWhiteSpace(c.Scalar)
@@ -707,6 +689,7 @@ namespace NitroSharp.Text
                     {
                         TextRunIndex = c.TextRun,
                         GlyphIndex = c.GlyphIndex,
+                        Scalar = c.Scalar,
                         Position = position,
                         Kind = CharacterKind.RubyText,
                         IsWhitespace = Rune.IsWhiteSpace(c.Scalar)

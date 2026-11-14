@@ -112,6 +112,14 @@ namespace NitroSharp.NsScript.Syntax
             char character = PeekChar();
             switch (character)
             {
+                case '[':
+                    AdvanceChar();
+                    token.Kind = SyntaxTokenKind.OpenBracket;
+                    break;
+                case ']':
+                    AdvanceChar();
+                    token.Kind = SyntaxTokenKind.CloseBracket;
+                    break;
                 case '"':
                     if (!SyntaxFacts.IsSigil(PeekChar(1)))
                     {
@@ -468,7 +476,8 @@ namespace NitroSharp.NsScript.Syntax
             }
 
             int valueStart = Position;
-            while (SyntaxFacts.IsIdentifierPartCharacter(PeekChar(), PeekChar(1)))
+            while (SyntaxFacts.IsIdentifierPartCharacter(PeekChar(), PeekChar(1))
+                && PeekChar() is not ('[' or ']'))
             {
                 AdvanceChar();
             }

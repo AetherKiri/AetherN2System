@@ -21,6 +21,7 @@ internal static class EnumConversions
             BuiltInConstant.PushText => NsEntityAction.NoTextAnimation,
             BuiltInConstant.Pause => NsEntityAction.Pause,
             BuiltInConstant.Resume => NsEntityAction.Resume,
+            BuiltInConstant.Passive => NsEntityAction.Passive,
             _ => NsEntityAction.Other,
         };
     }
@@ -59,7 +60,7 @@ internal static class EnumConversions
     {
         return val switch
         {
-            BuiltInConstant.LightDown => NsOutlineOffset.Unspecified,
+            BuiltInConstant.None or BuiltInConstant.LightDown => NsOutlineOffset.Unspecified,
             BuiltInConstant.Around => NsOutlineOffset.Center,
             BuiltInConstant.Left => NsOutlineOffset.Left,
             BuiltInConstant.Up => NsOutlineOffset.Top,

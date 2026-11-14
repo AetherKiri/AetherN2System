@@ -29,13 +29,11 @@ internal sealed class SolidColorRect : RenderItem
             Color.ToVector4()
         );
 
-        renderContext.MainBatch.PushQuad(
+        PushQuad(renderContext, renderContext.MainBatch,
             quad,
             renderContext.WhiteTexture,
             renderContext.WhiteTexture,
             default,
-            BlendMode,
-            FilterMode,
             null
         );
     }

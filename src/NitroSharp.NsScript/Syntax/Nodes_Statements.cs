@@ -175,23 +175,26 @@ public sealed class SelectStatement : Statement
 
 public sealed class SelectSection : Statement
 {
-    internal SelectSection(Spanned<string> label, Block body, TextSpan span)
+    internal SelectSection(Spanned<string> label, Block body, TextSpan span, Expression? labelExpression = null)
         : base(span)
     {
         Label = label;
+        LabelExpression = labelExpression;
         Body = body;
     }
 
     public Spanned<string> Label { get; }
+    public Expression? LabelExpression { get; }
     public Block Body { get; }
 
     public override SyntaxNodeKind Kind => SyntaxNodeKind.SelectSection;
 
     protected override SyntaxNode? GetChild(int index)
     {
-        return index switch
+        return (LabelExpression, index) switch
         {
-            0 => Body,
+            (not null, 0) => LabelExpression,
+            (not null, 1) or (null, 0) => Body,
             _ => null
         };
     }
@@ -223,6 +226,11 @@ public sealed class CallChapterStatement : Statement
 
 public sealed class CallSceneStatement : Statement
 {
+    internal CallSceneStatement(Expression dynamicTarget, TextSpan span) : base(span)
+    {
+        DynamicTarget = dynamicTarget;
+    }
+
     internal CallSceneStatement(
         Spanned<string>? targetFile,
         Spanned<string> targetScene,
@@ -234,6 +242,7 @@ public sealed class CallSceneStatement : Statement
 
     public Spanned<string>? TargetModule { get; }
     public Spanned<string> TargetScene { get; }
+    public Expression? DynamicTarget { get; }
     public override SyntaxNodeKind Kind => SyntaxNodeKind.CallSceneStatement;
 
     public override void Accept(SyntaxVisitor visitor)
@@ -241,7 +250,7 @@ public sealed class CallSceneStatement : Statement
         visitor.VisitCallSceneStatement(this);
     }
 
-    protected override SyntaxNode? GetChild(int index) => null;
+    protected override SyntaxNode? GetChild(int index) => index == 0 ? DynamicTarget : null;
 }
 
 public sealed class ErrorStatement(TextSpan span) : Statement(span)

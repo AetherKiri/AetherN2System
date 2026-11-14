@@ -40,6 +40,11 @@ namespace NitroSharp.NsScript
         [FieldOffset(14)]
         private readonly short _slot;
 
+        // N2 values may have both a scalar and indexed children. Attaching
+        // children must not replace a row's scalar label.
+        [FieldOffset(16)]
+        private readonly NsArray? _array;
+
         private float FloatValue
         {
             get
@@ -63,9 +68,21 @@ namespace NitroSharp.NsScript
 
         public ConstantValue WithSlot(short slot) => new(this, slot);
 
+        internal NsArray? Array => _array;
+        internal ConstantValue WithArray(NsArray array) => new(this, array);
+        internal ConstantValue Scalar => new(this, (NsArray?)null);
+
+        private ConstantValue(in ConstantValue value, NsArray? array)
+        {
+            this = value;
+            _array = array;
+            _slot = UnspecifiedSlot;
+        }
+
         public ConstantValue(ref MessagePackReader reader) : this()
         {
-            reader.ReadArrayHeader();
+            int size = reader.ReadArrayHeader();
+            _slot = UnspecifiedSlot;
             Type = (BuiltInType)reader.ReadInt32();
             switch (Type)
             {
@@ -82,12 +99,15 @@ namespace NitroSharp.NsScript
                     _bezierCurve = new CompositeBezier(ref reader);
                     break;
             }
+            int scalarSize = Type is BuiltInType.Null or BuiltInType.Uninitialized ? 1 : 2;
+            if (size > scalarSize)
+                _array = new NsArray(this, ref reader);
         }
 
         public void Serialize(ref MessagePackWriter writer)
         {
             int size = Type is BuiltInType.Null or BuiltInType.Uninitialized ? 1 : 2;
-            writer.WriteArrayHeader(size);
+            writer.WriteArrayHeader(size + (_array is null ? 0 : 1));
             writer.Write((int)Type);
             switch (Type)
             {
@@ -104,6 +124,7 @@ namespace NitroSharp.NsScript
                     _bezierCurve.Serialize(ref writer);
                     break;
             }
+            _array?.Serialize(ref writer);
         }
 
         private ConstantValue(in ConstantValue value, short slot)
@@ -202,6 +223,7 @@ namespace NitroSharp.NsScript
             {
                 BuiltInType.Boolean => _numericValue > 0,
                 BuiltInType.Numeric => FloatValue > 0,
+                BuiltInType.String => _stringValue!.Length > 0,
                 _ => null
             };
 

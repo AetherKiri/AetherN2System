@@ -2,14 +2,14 @@
 
 namespace NitroSharp.Tests;
 
-internal class TestContext
+internal sealed class TestContext
 {
-    static TestContext()
+    public TestContext()
     {
         MainProcess = new(EntityName.Parse("test"), null, new FontSettings());
         MainThread = new Thread(EntityName.Parse("main"), MainProcess, default, isMain: true);
     }
 
-    public static Process MainProcess { get; }
-    public static Thread MainThread { get; }
+    public Process MainProcess { get; }
+    public Thread MainThread { get; }
 }

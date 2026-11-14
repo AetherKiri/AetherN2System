@@ -14,7 +14,8 @@ internal enum AnimationKind
     Rotate,
     BezierMove,
     Transition,
-    Fade
+    Fade,
+    FrameSequence
 }
 
 internal abstract class Animation
@@ -277,6 +278,28 @@ internal sealed class MoveAnimation : Vector3Animation<RenderItem>
     {
     }
     protected override ref Vector3 GetValueRef() => ref _entity.Transform.Position;
+}
+
+internal sealed class RotationAnimation(
+    RenderItem entity, in Vector3 startRotation, in Vector3 endRotation,
+    TimeSpan duration, NsEaseFunction easeFunction)
+    : Vector3Animation<RenderItem>(entity, startRotation, endRotation, duration, easeFunction)
+{
+    protected override ref Vector3 GetValueRef() => ref _entity.Transform.Rotation;
+}
+
+internal sealed class BezierMoveAnimation(
+    RenderItem entity, ProcessedBezierCurve curve, TimeSpan duration, NsEaseFunction easeFunction)
+    : AnimationWithDuration(duration, easeFunction)
+{
+    protected override AdvanceResult Advance()
+    {
+        float position = Math.Clamp(GetFactor(Progress, EaseFunction), 0, 1) * curve.Segments.Length;
+        int index = Math.Min((int)position, curve.Segments.Length - 1);
+        Vector2 point = curve.Segments[index].CalcPoint(position - index);
+        entity.Transform.Position = new Vector3(point, entity.Transform.Position.Z);
+        return base.Advance();
+    }
 }
 
 internal sealed class ScaleAnimation : Vector3Animation<RenderItem>

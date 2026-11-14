@@ -124,6 +124,11 @@ public abstract class SyntaxVisitor
         DefaultVisitNode(unaryExpression);
     }
 
+    public virtual void VisitIndexExpression(IndexExpression indexExpression)
+    {
+        DefaultVisitNode(indexExpression);
+    }
+
     public virtual void VisitBinaryExpression(BinaryExpression binaryExpression)
     {
         DefaultVisitNode(binaryExpression);

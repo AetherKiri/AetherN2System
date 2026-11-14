@@ -35,6 +35,7 @@ internal ref struct Emitter
     private int _textId;
     private ValueStack<BreakScope> _breakScopes;
     private bool _suppressConstantLookup;
+    private bool _suppressNameConstantLookup;
 
     private Emitter(
         NsxModuleBuilder moduleBuilder,
@@ -49,6 +50,7 @@ internal ref struct Emitter
         _code = codeBuffer;
         _textId = 0;
         _suppressConstantLookup = false;
+        _suppressNameConstantLookup = false;
 
         if (subroutine is FunctionSymbol { Parameters.Length: > 0 } function)
         {
@@ -153,6 +155,16 @@ internal ref struct Emitter
             case SyntaxNodeKind.NameExpression:
                 EmitNameExpression((NameExpression)expression);
                 break;
+            case SyntaxNodeKind.IndexExpression:
+                var indexed = (IndexExpression)expression;
+                EmitExpression(indexed.Target);
+                EmitOpcode(Opcode.EnsureArray);
+                if (indexed.Index is NameExpression { Sigil: SigilKind.None } name)
+                    EmitLoadImm(ConstantValue.String(name.Name));
+                else
+                    EmitExpression(indexed.Index);
+                EmitOpcode(Opcode.LoadIndex);
+                break;
             case SyntaxNodeKind.UnaryExpression:
                 EmitUnaryExpression((UnaryExpression)expression);
                 break;
@@ -191,7 +203,9 @@ internal ref struct Emitter
         switch (lookupResult.Variant)
         {
             case LookupResultVariant.BuiltInConstant:
-                EmitLoadImm(ConstantValue.BuiltInConstant(lookupResult.BuiltInConstant));
+                EmitLoadImm(_suppressNameConstantLookup
+                    ? ConstantValue.String(expression.Name)
+                    : ConstantValue.BuiltInConstant(lookupResult.BuiltInConstant));
                 break;
             case LookupResultVariant.Variable:
                 Debug.Assert(lookupResult.Global is not null);
@@ -227,6 +241,15 @@ internal ref struct Emitter
 
     private void EmitAssignmentExpression(AssignmentExpression assignmentExpr)
     {
+        if (assignmentExpr.Target is IndexExpression)
+        {
+            EmitExpression(assignmentExpr.Value);
+            EmitExpression(assignmentExpr.Target);
+            EmitOpcode(Opcode.StoreIndex);
+            _code.WriteByte((byte)assignmentExpr.OperatorKind.Value);
+            EmitLoadImm(ConstantValue.Null);
+            return;
+        }
         LookupResult target = _checker.ResolveAssignmentTarget(assignmentExpr.Target);
         if (target.IsEmpty)
         {
@@ -301,6 +324,7 @@ internal ref struct Emitter
         bool isBuiltIn = lookupResult.Variant == LookupResultVariant.BuiltInFunction;
         ImmutableArray<Expression> arguments = callExpression.Arguments;
         bool suppressConstantLookup = _suppressConstantLookup;
+        bool suppressNameConstantLookup = _suppressNameConstantLookup;
 
         if (!isBuiltIn)
         {
@@ -310,9 +334,13 @@ internal ref struct Emitter
             for (int i = 0; i < count; i++)
             {
                 _suppressConstantLookup = true;
+                // Quoted labels remain strings, while bare names such as Center
+                // retain their constant identity when forwarded through helpers.
+                _suppressNameConstantLookup = false;
                 EmitExpression(arguments[i]);
                 EmitStore(Opcode.StoreVar, GetVariableToken(target.Parameters[i].Name));
                 _suppressConstantLookup = suppressConstantLookup;
+                _suppressNameConstantLookup = suppressNameConstantLookup;
             }
         }
         else
@@ -324,9 +352,16 @@ internal ref struct Emitter
             // Update: also make an exception for regular function calls (see code above).
             for (int i = 0; i < arguments.Length; i++)
             {
-                _suppressConstantLookup = i == 0;
+                _suppressConstantLookup = i == 0
+                    || lookupResult.BuiltInFunction is BuiltInFunction.Array or BuiltInFunction.AssocArray
+                    || lookupResult.BuiltInFunction == BuiltInFunction.VariableValue && i == 1
+                    || lookupResult.BuiltInFunction == BuiltInFunction.CreateFrameAnimation && i == 6;
+                _suppressNameConstantLookup = _suppressConstantLookup;
                 EmitExpression(arguments[i]);
+                if (i == 0 && lookupResult.BuiltInFunction is BuiltInFunction.Array or BuiltInFunction.AssocArray)
+                    EmitOpcode(Opcode.EnsureArray);
                 _suppressConstantLookup = suppressConstantLookup;
+                _suppressNameConstantLookup = suppressNameConstantLookup;
             }
         }
 
@@ -387,6 +422,18 @@ internal ref struct Emitter
 
     private void EmitCallScene(CallSceneStatement statement)
     {
+        if (statement.DynamicTarget is { } target)
+        {
+            using (BeginSourceMapping(statement))
+            {
+                bool suppressConstantLookup = _suppressConstantLookup;
+                _suppressConstantLookup = true;
+                EmitExpression(target);
+                _suppressConstantLookup = suppressConstantLookup;
+                EmitOpcode(Opcode.CallSceneDynamic);
+            }
+            return;
+        }
         if (_checker.ResolveCallSceneTarget(statement) is { } scene)
         {
             using (BeginSourceMapping(statement))
@@ -565,8 +612,21 @@ internal ref struct Emitter
     private void EmitSelectSection(SelectSection section)
     {
         using SourceMappingScope scope = BeginSourceMapping(section);
-        EmitOpcode(Opcode.IsPressed);
-        _code.WriteUInt16LE(_module.GetStringToken(section.Label.Value));
+        if (section.LabelExpression is { } expression)
+        {
+            bool suppressConstantLookup = _suppressConstantLookup;
+            bool suppressNameConstantLookup = _suppressNameConstantLookup;
+            _suppressConstantLookup = _suppressNameConstantLookup = true;
+            EmitExpression(expression);
+            _suppressConstantLookup = suppressConstantLookup;
+            _suppressNameConstantLookup = suppressNameConstantLookup;
+            EmitOpcode(Opcode.IsPressedDynamic);
+        }
+        else
+        {
+            EmitOpcode(Opcode.IsPressed);
+            _code.WriteUInt16LE(_module.GetStringToken(section.Label.Value));
+        }
         JumpPlaceholder jmp = EmitJump(Opcode.JumpIfFalse);
         EmitStatement(section.Body);
         PatchJump(jmp, _code.Position);

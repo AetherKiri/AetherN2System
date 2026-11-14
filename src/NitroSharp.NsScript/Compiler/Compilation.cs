@@ -7,28 +7,30 @@ using System.Text;
 using JetBrains.Annotations;
 using NitroSharp.NsScript.Syntax;
 using NitroSharp.NsScript.Utilities;
+using NitroSharp.NsScript.VM;
 
 namespace NitroSharp.NsScript.Compiler;
 
 public class Compilation
 {
     private readonly Encoding? _sourceTextEncoding;
+    private readonly SourceTextDecodingOptions? _decodingOptions;
     protected readonly Dictionary<ResolvedPath, SyntaxTree> _syntaxTrees;
     private readonly Dictionary<SyntaxTree, SourceModuleSymbol> _sourceModuleSymbols;
     private readonly DiagnosticBuilder _referenceResolveDiagnostics = new();
 
-    public Compilation(string rootSourceDirectory, Encoding? sourceTextEncoding = null)
-        : this(new DefaultSourceReferenceResolver(rootSourceDirectory), sourceTextEncoding)
+    public Compilation(string rootSourceDirectory, Encoding? sourceTextEncoding = null, SourceTextDecodingOptions? decodingOptions = null)
+        : this(new DefaultSourceReferenceResolver(rootSourceDirectory), sourceTextEncoding, decodingOptions)
     {
     }
 
-    public Compilation(SourceReferenceResolver sourceReferenceResolver, Encoding? sourceTextEncoding = null)
-        : this(sourceReferenceResolver, sourceTextEncoding, new(), new())
+    public Compilation(SourceReferenceResolver sourceReferenceResolver, Encoding? sourceTextEncoding = null, SourceTextDecodingOptions? decodingOptions = null)
+        : this(sourceReferenceResolver, sourceTextEncoding, decodingOptions, new(), new())
     {
     }
 
     protected Compilation(Compilation source)
-        : this(source.SourceReferenceResolver, source._sourceTextEncoding,
+        : this(source.SourceReferenceResolver, source._sourceTextEncoding, source._decodingOptions,
             source._syntaxTrees, source._sourceModuleSymbols)
     {
     }
@@ -36,11 +38,13 @@ public class Compilation
     private Compilation(
         SourceReferenceResolver sourceReferenceResolver,
         Encoding? sourceTextEncoding,
+        SourceTextDecodingOptions? decodingOptions,
         Dictionary<ResolvedPath, SyntaxTree> syntaxTrees,
         Dictionary<SyntaxTree, SourceModuleSymbol> sourceModuleSymbols)
     {
         SourceReferenceResolver = sourceReferenceResolver;
         _sourceTextEncoding = sourceTextEncoding;
+        _decodingOptions = decodingOptions;
         _syntaxTrees = syntaxTrees;
         _sourceModuleSymbols = sourceModuleSymbols;
     }
@@ -79,13 +83,29 @@ public class Compilation
         return Emit(roots, _ => Stream.Null, Stream.Null);
     }
 
+    internal EmittedCompilation EmitIncremental(
+        SourceModuleSymbol root,
+        Func<NsxModuleBuilder, Stream> outputStreamFactory,
+        Stream globalsOutputStream,
+        GlobalsLookupTable globals)
+        => Emit([root], outputStreamFactory, globalsOutputStream, globals);
+
     [MustUseReturnValue]
     private EmittedCompilation Emit(
         ReadOnlySpan<SourceModuleSymbol> roots,
         Func<NsxModuleBuilder, Stream> outputStreamFactory,
-        Stream globalsOutputStream)
+        Stream globalsOutputStream,
+        GlobalsLookupTable? globals = null)
     {
         var context = new EmitContext(this);
+        if (globals is not null)
+        {
+            // Previously emitted modules keep their slots; new names are appended.
+            foreach ((string name, int _) in globals.Variables.OrderBy(pair => pair.Value))
+                context.GetVariableToken(name);
+            foreach ((string name, int _) in globals.Flags.OrderBy(pair => pair.Value))
+                context.GetFlagToken(name);
+        }
         var compiledSourceFiles = new HashSet<ResolvedPath>();
         foreach (SourceModuleSymbol sourceModule in roots)
         {
@@ -207,7 +227,7 @@ public class Compilation
             return syntaxTree;
         }
 
-        SourceText sourceText = SourceReferenceResolver.ReadText(resolvedPath, _sourceTextEncoding);
+        SourceText sourceText = SourceReferenceResolver.ReadText(resolvedPath, _sourceTextEncoding, _decodingOptions);
         syntaxTree = SyntaxTree.ParseText(sourceText);
         _syntaxTrees[resolvedPath] = syntaxTree;
         return syntaxTree;
@@ -225,6 +245,14 @@ public class Compilation
     {
         SyntaxTree tree = GetSyntaxTree(relativePath);
         return GetModuleSymbol(tree);
+    }
+
+    internal SourceModuleSymbol GetSourceModule(string relativePath, SourceModuleSymbol? functionFallback)
+    {
+        SyntaxTree tree = GetSyntaxTree(relativePath);
+        SourceModuleSymbol module = CreateModuleSymbol(tree, functionFallback);
+        _sourceModuleSymbols[tree] = module;
+        return module;
     }
 
     public SourceModuleSymbol? TryGetSourceModule(string relativePath)
@@ -249,17 +277,17 @@ public class Compilation
         return symbol;
     }
 
-    private SourceModuleSymbol CreateModuleSymbol(SyntaxTree syntaxTree)
+    private SourceModuleSymbol CreateModuleSymbol(SyntaxTree syntaxTree, SourceModuleSymbol? functionFallback = null)
     {
         if (syntaxTree.Root is SourceFileRoot { FileReferences.Length: 0 })
         {
-            return new SourceModuleSymbol(this, [syntaxTree]);
+            return new SourceModuleSymbol(this, [syntaxTree], functionFallback);
         }
 
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>(4);
         trees.Add(syntaxTree);
         CollectReferences(syntaxTree, trees);
-        return new SourceModuleSymbol(this, trees.ToImmutable());
+        return new SourceModuleSymbol(this, trees.ToImmutable(), functionFallback);
     }
 
     private void CollectReferences(SyntaxTree syntaxTree, ImmutableArray<SyntaxTree>.Builder results)

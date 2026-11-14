@@ -1,53 +1,65 @@
-﻿namespace NitroSharp.NsScript.VM;
+﻿using System;
+
+namespace NitroSharp.NsScript.VM;
 
 public sealed class SystemVariableLookup
 {
     private readonly NsScriptVM _vm;
-    private readonly GlobalsLookupTable _nameLookup;
 
-    public readonly int PresentProcess;
-    private readonly int _presentPreprocess;
-    private readonly int _presentText;
+    public int PresentProcess { get; private set; }
+    private int _presentPreprocess;
+    private int _presentText;
 
-    private readonly int _rButtonDown;
-    private readonly int _x360ButtonStartDown;
-    private readonly int _x360ButtonADown;
-    private readonly int _x360ButtonBDown;
-    private readonly int _x360ButtonYDown;
+    private int _rButtonDown;
+    private int _x360ButtonStartDown;
+    private int _x360ButtonADown;
+    private int _x360ButtonBDown;
+    private int _x360ButtonYDown;
 
-    private readonly int _x360ButtonLeftDown;
-    private readonly int _x360ButtonUpDown;
-    private readonly int _x360ButtonRightDown;
-    private readonly int _x360ButtonDownDown;
+    private int _x360ButtonLeftDown;
+    private int _x360ButtonUpDown;
+    private int _x360ButtonRightDown;
+    private int _x360ButtonDownDown;
 
-    private readonly int _x360ButtonLbDown;
-    private readonly int _x360ButtonRbDown;
-    private readonly int _backlogEnable;
-    private readonly int _backlogRowMax;
-    private readonly int _backlogPositionX;
-    private readonly int _backlogPositionY;
-    private readonly int _backlogRowInterval;
-    private readonly int _backlogCharacterWidth;
+    private int _x360ButtonLbDown;
+    private int _x360ButtonRbDown;
+    private int _backlogEnable;
+    private int _backlogRowMax;
+    private int _backlogPositionX;
+    private int _backlogPositionY;
+    private int _backlogRowInterval;
+    private int _backlogCharacterWidth;
 
-    private readonly int _positionXTextIcon;
-    private readonly int _positionYTextIcon;
-    private readonly int _savePath;
+    private int _positionXTextIcon;
+    private int _positionYTextIcon;
+    private int _savePath;
 
-    private readonly int _lastText;
-    private readonly int _skip;
-    private readonly int _textAuto;
-    private readonly int _textAutoLock;
-    private readonly int _menuLock;
-    private readonly int _skipLock;
-    private readonly int _backlogLock;
+    private int _lastText;
+    private int _skip;
+    private int _textAuto;
+    private int _textAutoLock;
+    private int _menuLock;
+    private int _skipLock;
+    private int _backlogLock;
+    private int _textInterval;
+    private int _textSpeed;
+    private int _textWaitKey;
+    private int _autoWaitPerCharacter;
+
+    private static readonly string[] s_audioChannels = ["bgm", "se", "voice"];
+    private readonly int[] _audioEnabled = [-1, -1, -1];
+    private readonly int[] _audioVolume = [-1, -1, -1];
 
     private ConstantValue _missingVariable = ConstantValue.Null;
 
     public SystemVariableLookup(NsScriptVM vm)
     {
         _vm = vm;
-        _nameLookup = vm.GlobalsLookup;
+        Refresh();
+    }
 
+    internal void Refresh()
+    {
         _savePath = Lookup("SYSTEM_save_path");
 
         _presentPreprocess = Lookup("SYSTEM_present_preprocess");
@@ -82,13 +94,42 @@ public sealed class SystemVariableLookup
         _menuLock = Lookup("SYSTEM_menu_lock");
         _skipLock = Lookup("SYSTEM_skip_lock");
         _backlogLock = Lookup("SYSTEM_backlog_lock");
+        _textInterval = _vm.GlobalsLookup.Variables.TryGetValue("SYSTEM_text_interval", out int interval) ? interval : -1;
+        _textSpeed = _vm.GlobalsLookup.Flags.TryGetValue("SYSTEM_text_speed", out int speed) ? speed : -1;
+        _textWaitKey = _vm.GlobalsLookup.Variables.TryGetValue("SYSTEM_text_waitkey", out int waitKey) ? waitKey : -1;
+        _autoWaitPerCharacter = _vm.GlobalsLookup.Flags.TryGetValue("SYSTEM_auto_wait_per_character", out int autoWait) ? autoWait : -1;
+
+        for (int i = 0; i < s_audioChannels.Length; i++)
+        {
+            _audioEnabled[i] = _vm.GlobalsLookup.Flags.TryGetValue("SYSTEM_sound_" + s_audioChannels[i], out int enabled) ? enabled : -1;
+            _audioVolume[i] = _vm.GlobalsLookup.Flags.TryGetValue("SYSTEM_sound_volume_" + s_audioChannels[i], out int volume) ? volume : -1;
+        }
     }
+
+    public (ConstantValue? Enabled, ConstantValue? Volume) GetAudioSettings(NsAudioKind kind)
+    {
+        int index = kind switch
+        {
+            NsAudioKind.BackgroundMusic => 0,
+            NsAudioKind.SoundEffect => 1,
+            NsAudioKind.Voice => 2,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind))
+        };
+        return (_audioEnabled[index] >= 0 ? _vm.GetFlag(_audioEnabled[index]) : null,
+            _audioVolume[index] >= 0 ? _vm.GetFlag(_audioVolume[index]) : null);
+    }
+
+    public (ConstantValue? Interval, ConstantValue? Speed, ConstantValue? WaitKey, ConstantValue? AutoWaitPerCharacter) GetTextSettings()
+        => (_textInterval >= 0 ? _vm.GetVariable(_textInterval) : null,
+            _textSpeed >= 0 ? _vm.GetFlag(_textSpeed) : null,
+            _textWaitKey >= 0 ? _vm.GetVariable(_textWaitKey) : null,
+            _autoWaitPerCharacter >= 0 ? _vm.GetFlag(_autoWaitPerCharacter) : null);
 
     private int Lookup(string name)
     {
-        if (!_nameLookup.TryLookupSystemVariable(name, out int index))
+        if (!_vm.GlobalsLookup.TryLookupSystemVariable(name, out int index))
         {
-            if (!_nameLookup.TryLookupSystemFlag(name, out index))
+            if (!_vm.GlobalsLookup.TryLookupSystemFlag(name, out index))
             {
                 return -1;
             }

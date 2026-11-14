@@ -201,6 +201,13 @@ internal sealed class RoundtripSyntaxWriter(TextWriter textWriter)
     {
         Write(SyntaxFacts.GetText(SyntaxTokenKind.CallSceneKeyword));
         WriteSpace();
+        if (callSceneStatement.DynamicTarget is { } target)
+        {
+            WriteExpression(target, Precedence.Expression);
+            Write(";");
+            WriteLine();
+            return;
+        }
         if (callSceneStatement.TargetModule is null)
         {
             Write("@->");
@@ -238,6 +245,14 @@ internal sealed class RoundtripSyntaxWriter(TextWriter textWriter)
     {
         Write(OperatorInfo.GetText(unaryExpression.OperatorKind.Value));
         WriteExpression(unaryExpression.Operand, Precedence.Unary);
+    }
+
+    public override void VisitIndexExpression(IndexExpression indexExpression)
+    {
+        Visit(indexExpression.Target);
+        Write("[");
+        WriteExpression(indexExpression.Index, Precedence.Expression);
+        Write("]");
     }
 
     public override void VisitBinaryExpression(BinaryExpression binaryExpression)

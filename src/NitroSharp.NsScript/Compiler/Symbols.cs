@@ -29,8 +29,12 @@ public abstract class NamedSymbol(string name) : Symbol
 
 public sealed class SourceModuleSymbol : Symbol
 {
-    public SourceModuleSymbol(Compilation compilation, ImmutableArray<SyntaxTree> syntaxTrees)
+    // Dynamic scenes may use functions visible to their caller, after their own includes.
+    private readonly SourceModuleSymbol? _functionFallback;
+
+    public SourceModuleSymbol(Compilation compilation, ImmutableArray<SyntaxTree> syntaxTrees, SourceModuleSymbol? functionFallback = null)
     {
+        _functionFallback = functionFallback;
         Debug.Assert(syntaxTrees.Length > 0);
         RootSourceFile = MakeSourceFileSymbol(syntaxTrees[0], compilation);
 
@@ -111,7 +115,7 @@ public sealed class SourceModuleSymbol : Symbol
             if (function is not null) { break; }
         }
 
-        return function;
+        return function ?? _functionFallback?.LookupFunction(name);
     }
 
     public override string ToString() => $"Module '{RootSourceFile.Name}'";

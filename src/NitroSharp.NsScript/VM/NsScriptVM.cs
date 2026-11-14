@@ -22,9 +22,11 @@ public sealed class NsScriptVM
     private readonly Log _log;
     private readonly NsxModuleLocator _moduleLocator;
     private readonly Dictionary<string, NsxModule> _loadedModules;
+    private readonly Dictionary<string, NsxModule> _scopedSceneModules = new();
+    private NsxModule? _currentModule;
     private readonly BuiltInFunctionDispatcher _builtInCallDispatcher;
-    private readonly ConstantValue[] _variables;
-    private readonly ConstantValue[] _flags;
+    private ConstantValue[] _variables;
+    private ConstantValue[] _flags;
     private readonly Stack<CubicBezierSegment> _bezierSegmentStack;
 
     public NsScriptVM(NsxModuleLocator moduleLocator, Stream globalsLookupTableStream)
@@ -32,15 +34,16 @@ public sealed class NsScriptVM
         _log = LogManager.GetLogger("VM");
         _loadedModules = new Dictionary<string, NsxModule>(16);
         _moduleLocator = moduleLocator;
-        _variables = new ConstantValue[5000];
-        _flags = new ConstantValue[2000];
-        _builtInCallDispatcher = new BuiltInFunctionDispatcher(_variables);
         GlobalsLookup = GlobalsLookupTable.Load(globalsLookupTableStream);
+        _variables = new ConstantValue[Math.Max(5000, GlobalsLookup.Variables.Count)];
+        _flags = new ConstantValue[Math.Max(2000, GlobalsLookup.Flags.Count)];
+        _builtInCallDispatcher = new BuiltInFunctionDispatcher(_variables, _flags);
+        InitializeAudioDefaults();
         SystemVariables = new SystemVariableLookup(this);
         _bezierSegmentStack = new Stack<CubicBezierSegment>();
     }
 
-    internal GlobalsLookupTable GlobalsLookup { get; }
+    internal GlobalsLookupTable GlobalsLookup { get; private set; }
 
     public SystemVariableLookup SystemVariables { get; }
 
@@ -85,8 +88,16 @@ public sealed class NsScriptVM
 
     internal NsxModule GetModule(string name)
     {
+        name = _moduleLocator.NormalizeModuleName(name);
         if (!_loadedModules.TryGetValue(name, out NsxModule? module))
         {
+            if (_moduleLocator.CompileModuleIfMissing(name, GlobalsLookup, _loadedModules) is { } compiled)
+            {
+                UpdateGlobals(compiled.Globals);
+                foreach ((string moduleName, byte[] bytes) in compiled.Modules)
+                    _loadedModules.Add(moduleName, NsxModule.LoadModule(new MemoryStream(bytes), moduleName));
+                return _loadedModules[name];
+            }
             Stream stream = _moduleLocator.OpenModule(name);
             module = NsxModule.LoadModule(stream, name);
             _loadedModules.Add(name, module);
@@ -97,11 +108,13 @@ public sealed class NsScriptVM
 
     public NsScriptThreadState? CreateThread(string moduleName, string symbol)
     {
-        NsxModule? module = GetModule(moduleName);
+        NsxModule? module = _currentModule is { } current && current.Name == _moduleLocator.NormalizeModuleName(moduleName)
+            ? current : GetModule(moduleName);
         if (!module.TryLookupSubroutineIndex(symbol, out int index))
         {
+            NsxModule owner = module;
             module = module.Imports
-                .Select(GetModule)
+                .Select(name => GetImportedModule(owner, name))
                 .FirstOrDefault(import => import.TryLookupSubroutineIndex(symbol, out index));
         }
 
@@ -150,6 +163,7 @@ public sealed class NsScriptVM
 
     public TickResult Tick(ref NsScriptThreadState thread, BuiltInFunctions builtins)
     {
+        NsxModule? previousModule = _currentModule;
         try
         {
             return TickCore(ref thread, builtins);
@@ -158,6 +172,10 @@ public sealed class NsScriptVM
         {
             ReportException(thread, e);
             throw;
+        }
+        finally
+        {
+            _currentModule = previousModule;
         }
     }
 
@@ -172,6 +190,7 @@ public sealed class NsScriptVM
 
         ref CallFrame frame = ref thread.CurrentFrame;
         NsxModule thisModule = frame.Module;
+        _currentModule = thisModule;
         builtins._vm = this;
         builtins.CurrentModule = thisModule;
         var program = new BytecodeStream(thisModule.Code, frame.ProgramCounter);
@@ -182,6 +201,7 @@ public sealed class NsScriptVM
             frame.ProgramCounter = program.Position;
             if (frame.EndPosition is { } end && program.Position >= end)
             {
+                if (frame.HasCallScope) builtins.LeaveCallScope();
                 thread.CallFrameStack.Pop();
                 return TickResult.Ok;
             }
@@ -202,6 +222,32 @@ public sealed class NsScriptVM
                 case Opcode.StoreFlag:
                     index = program.DecodeToken();
                     GetFlag(index) = evalStack.Pop();
+                    break;
+                case Opcode.EnsureArray:
+                    ref ConstantValue arrayTarget = ref evalStack.Peek();
+                    arrayTarget = EnsureArray(arrayTarget).Value;
+                    break;
+                case Opcode.LoadIndex:
+                    ConstantValue key = evalStack.Pop();
+                    ConstantValue arrayValue = evalStack.Pop();
+                    evalStack.Push(EnsureArray(arrayValue).Get(key).Value);
+                    break;
+                case Opcode.StoreIndex:
+                    NsArray item = evalStack.Pop().Array
+                        ?? throw new InvalidOperationException("Indexed assignment requires an array value.");
+                    ConstantValue assigned = evalStack.Pop();
+                    var assignment = (AssignmentOperatorKind)program.ReadByte();
+                    item.Scalar = assignment switch
+                    {
+                        AssignmentOperatorKind.Assign => assigned.Scalar,
+                        AssignmentOperatorKind.AddAssign => item.Scalar + assigned,
+                        AssignmentOperatorKind.SubtractAssign => item.Scalar - assigned,
+                        AssignmentOperatorKind.MultiplyAssign => item.Scalar * assigned,
+                        AssignmentOperatorKind.DivideAssign => item.Scalar / assigned,
+                        AssignmentOperatorKind.Increment => item.Scalar + ConstantValue.Number(1),
+                        AssignmentOperatorKind.Decrement => item.Scalar - ConstantValue.Number(1),
+                        _ => throw new InvalidOperationException("Unknown indexed assignment operator.")
+                    };
                     break;
                 case Opcode.Binary:
                     var opKind = (BinaryOperatorKind)program.ReadByte();
@@ -251,8 +297,9 @@ public sealed class NsScriptVM
                     break;
                 case Opcode.Invert:
                     val = ref evalStack.Peek();
-                    Debug.Assert(val.AsBool() is not null);
-                    val = ConstantValue.Boolean(!val.AsBool()!.Value);
+                    bool boolean = val.AsBool()
+                        ?? throw new InvalidOperationException($"Operator '!' cannot be applied to a value of type '{val.Type}'.");
+                    val = ConstantValue.Boolean(!boolean);
                     break;
                 case Opcode.Pop:
                     evalStack.Pop();
@@ -268,18 +315,24 @@ public sealed class NsScriptVM
                     }
                     return TickResult.Ok;
                 case Opcode.CallFar:
-                case Opcode.CallChapter:
                     newFrame = externalCall(ref program);
                     frame.ProgramCounter = program.Position;
                     thread.CallFrameStack.Push(newFrame);
                     return TickResult.Ok;
+                case Opcode.CallChapter:
                 case Opcode.CallScene:
                     newFrame = externalCall(ref program);
                     frame.ProgramCounter = program.Position;
-                    var newThread = new NsScriptThreadState(newFrame);
-                    // TODO: CallScene not actually implemented
-                    //Join(thread, newThread);
-                    //ResumeThread(newThread);
+                    newFrame.HasCallScope = true;
+                    builtins.EnterCallScope();
+                    thread.CallFrameStack.Push(newFrame);
+                    return TickResult.Ok;
+                case Opcode.CallSceneDynamic:
+                    newFrame = ResolveScene(SceneCaller(ref thread), evalStack.Pop().ConvertToString());
+                    frame.ProgramCounter = program.Position;
+                    newFrame.HasCallScope = true;
+                    builtins.EnterCallScope();
+                    thread.CallFrameStack.Push(newFrame);
                     return TickResult.Ok;
                 case Opcode.Jump:
                     int @base = program.Position - 1;
@@ -308,6 +361,7 @@ public sealed class NsScriptVM
                 case Opcode.Return:
                     if (thread.CallFrameStack.Count > 0)
                     {
+                        if (frame.HasCallScope) builtins.LeaveCallScope();
                         thread.CallFrameStack.Pop();
                     }
                     return TickResult.Ok;
@@ -336,8 +390,7 @@ public sealed class NsScriptVM
                     evalStack.Push(ConstantValue.BezierCurve(curve));
                     break;
                 case Opcode.Dispatch:
-                    builtins.DialogueCallerModule = thread.CallFrameStack.Count > 1
-                        ? thread.CallFrameStack.Peek(1).Module : thisModule;
+                    builtins.DialogueCallerModule = SceneCaller(ref thread);
                     dispatchBuiltIn(ref program, ref thread);
                     frame.ProgramCounter = program.Position;
                     return TickResult.Ok;
@@ -352,7 +405,10 @@ public sealed class NsScriptVM
                     thread.SelectResult = false;
                     break;
                 case Opcode.IsPressed:
-                    string choice = thisModule.GetString(program.DecodeToken());
+                case Opcode.IsPressedDynamic:
+                    string choice = opcode == Opcode.IsPressedDynamic
+                        ? evalStack.Pop().ConvertToString()
+                        : thisModule.GetString(program.DecodeToken());
                     bool pressed = builtins.HandleInputEvents(EntityQuery.Parse(choice));
                     evalStack.Push(ConstantValue.Boolean(pressed));
                     thread.SelectResult |= pressed;
@@ -383,7 +439,7 @@ public sealed class NsScriptVM
                 Opcode.LoadVar => GetVariable(varToken = program.DecodeToken())
                     .WithSlot((short)varToken),
                 Opcode.LoadFlag => GetFlag(flagToken = program.DecodeToken())
-                    .WithSlot((short)flagToken),
+                    .WithSlot((short)(-flagToken - 2)),
                 _ => null
             };
 
@@ -407,6 +463,15 @@ public sealed class NsScriptVM
             ConstantValue? result = null;
             switch (func)
             {
+                case BuiltInFunction.Array:
+                    if (args.Length > 0) EnsureArray(args[0]).SetItems(args[1..]);
+                    break;
+                case BuiltInFunction.AssocArray:
+                    if (args.Length > 0) EnsureArray(args[0]).SetNames(args[1..]);
+                    break;
+                case BuiltInFunction.VariableValue:
+                    result = VariableValue(args);
+                    break;
                 default:
                     result = _builtInCallDispatcher.Dispatch(builtins, func, args);
                     break;
@@ -433,7 +498,7 @@ public sealed class NsScriptVM
             ushort importTableIndex = program.DecodeToken();
             ushort subroutineToken = program.DecodeToken();
             string externalModuleName = thisModule.Imports[importTableIndex];
-            NsxModule externalModule = GetModule(externalModuleName);
+            NsxModule externalModule = GetImportedModule(thisModule, externalModuleName);
             return CreateEntryPointCallFrame(externalModule, subroutineToken);
         }
 
@@ -456,6 +521,165 @@ public sealed class NsScriptVM
             string routineName = callFrame.RuntimeInfo.SubroutineName;
             _log.Debug($"{moduleName}::{routineName}");
         }
+    }
+
+    private void UpdateGlobals(GlobalsLookupTable globals)
+    {
+        GlobalsLookup = globals;
+        if (_variables.Length < globals.Variables.Count) Array.Resize(ref _variables, globals.Variables.Count);
+        if (_flags.Length < globals.Flags.Count) Array.Resize(ref _flags, globals.Flags.Count);
+        InitializeAudioDefaults();
+        _builtInCallDispatcher.UpdateGlobals(_variables, _flags);
+        SystemVariables.Refresh();
+    }
+
+    private void InitializeAudioDefaults()
+    {
+        // These engine flags exist before scripts run; zero and false remain valid overrides.
+        foreach (string channel in new[] { "bgm", "se", "voice" })
+        {
+            Initialize("SYSTEM_sound_" + channel, ConstantValue.True);
+            Initialize("SYSTEM_sound_volume_" + channel, ConstantValue.Number(1000));
+            Initialize("SYSTEM_sound_volume_" + channel + "_default", ConstantValue.Number(1000));
+        }
+
+        void Initialize(string name, ConstantValue value)
+        {
+            if (GlobalsLookup.TryLookupSystemFlag(name, out int index)
+                && _flags[index].Type == BuiltInType.Uninitialized)
+                _flags[index] = value;
+        }
+    }
+
+    private ConstantValue VariableValue(ReadOnlySpan<ConstantValue> arguments)
+    {
+        if (arguments.Length is < 2 or > 3)
+            throw new ArgumentException("VariableValue requires a sigil, path, and optional value.");
+        string sigil = arguments[0].ConvertToString();
+        bool flag = sigil switch { "#" => true, "$" => false, _ => throw new ArgumentException("Invalid global sigil.") };
+        string path = arguments[1].ConvertToString();
+        int firstBracket = path.IndexOf('[');
+        string name = firstBracket >= 0 ? path[..firstBracket] : path;
+        if (name.Length == 0 || name.Contains(']') || name.Contains('$') || name.Contains('#'))
+            throw new ArgumentException("Invalid global path.");
+        var keys = new List<ConstantValue>();
+        int position = firstBracket >= 0 ? firstBracket : path.Length;
+        while (position < path.Length)
+        {
+            if (path[position] != '[') throw new ArgumentException("Invalid indexed global path.");
+            int close = path.IndexOf(']', position + 1);
+            if (close < 0) throw new ArgumentException("Unterminated global index.");
+            string key = path[(position + 1)..close];
+            if (key.Length == 0 || key.Contains('[')) throw new ArgumentException("Invalid global index.");
+            keys.Add(ConstantValue.String(key));
+            position = close + 1;
+        }
+        bool setter = arguments.Length == 3;
+        var lookup = flag ? GlobalsLookup.Flags : GlobalsLookup.Variables;
+        if (!lookup.TryGetValue(name, out int slot))
+        {
+            if (!setter) return ConstantValue.Number(0);
+            slot = lookup.Count;
+            if (slot > short.MaxValue - 2) throw new InvalidOperationException("Too many dynamic globals.");
+            UpdateGlobals(GlobalsLookup.WithGlobal(name, flag));
+        }
+        ref ConstantValue root = ref (flag ? ref GetFlag(slot) : ref GetVariable(slot));
+        if (keys.Count == 0)
+        {
+            if (setter)
+            {
+                if (root.Array is { } array) { array.Scalar = arguments[2].Scalar; root = array.Value; }
+                else root = arguments[2];
+            }
+            return root;
+        }
+        NsArray node = EnsureArray(root.WithSlot((short)(flag ? -slot - 2 : slot)));
+        foreach (ConstantValue key in keys) node = node.Get(key);
+        if (setter) node.Scalar = arguments[2].Scalar;
+        return node.Value;
+    }
+
+    private static NsxModule SceneCaller(ref NsScriptThreadState thread)
+    {
+        ReadOnlySpan<CallFrame> frames = thread.CallFrameStack.AsSpan();
+        for (int i = frames.Length - 1; i >= 0; i--)
+            if (frames[i].RuntimeInfo.SubroutineKind != SubroutineKind.Function) return frames[i].Module;
+        return frames[0].Module;
+    }
+
+    private NsxModule GetImportedModule(NsxModule owner, string name)
+    {
+        name = _moduleLocator.NormalizeModuleName(name);
+        return owner.ScopedModules is { } modules && modules.TryGetValue(name, out NsxModule? module)
+            ? module : GetModule(name);
+    }
+
+    private NsxModule GetSceneModule(string name, NsxModule caller)
+    {
+        name = _moduleLocator.NormalizeModuleName(name);
+        if (name == caller.Name) return caller;
+        string[] callerScopes = caller.SourceScopes.Length > 0 ? caller.SourceScopes : [caller.Name];
+        string cacheKey = name + "\0" + string.Join('\0', callerScopes);
+        if (_scopedSceneModules.TryGetValue(cacheKey, out NsxModule? cached)) return cached;
+        if (_moduleLocator.CompileModuleIfMissing(name, GlobalsLookup, _loadedModules, callerScopes) is not { } compiled)
+            return GetModule(name);
+        UpdateGlobals(compiled.Globals);
+        string[] scopes = new[] { name }.Concat(callerScopes).Distinct(StringComparer.Ordinal).ToArray();
+        var modules = new Dictionary<string, NsxModule>();
+        foreach ((string moduleName, byte[] bytes) in compiled.Modules)
+            modules.Add(moduleName, NsxModule.LoadModule(new MemoryStream(bytes), moduleName));
+        foreach (NsxModule module in modules.Values)
+        {
+            module.SourceScopes = scopes;
+            module.ScopedModules = modules;
+        }
+        NsxModule result = modules[name];
+        _scopedSceneModules.Add(cacheKey, result);
+        return result;
+    }
+
+    private CallFrame ResolveScene(NsxModule caller, string target)
+    {
+        int arrow = target.IndexOf("->", StringComparison.Ordinal);
+        NsxModule module = caller;
+        string scene = target;
+        if (arrow >= 0)
+        {
+            string moduleName = target[..arrow];
+            scene = target[(arrow + 2)..];
+            if (moduleName.Length > 0 && moduleName != "@") module = GetSceneModule(moduleName, caller);
+        }
+        if (tryFind(module, new HashSet<string>(), out CallFrame frame)) return frame;
+        throw new InvalidOperationException($"Scene '{scene}' was not found in module '{module.Name}'.");
+
+        bool tryFind(NsxModule candidate, HashSet<string> visited, out CallFrame result)
+        {
+            if (visited.Add(candidate.Name))
+            {
+                if (candidate.TryLookupSubroutineIndex(scene, out int index)
+                    && candidate.GetSubroutineRuntimeInfo(index).SubroutineKind == SubroutineKind.Scene)
+                {
+                    result = CreateEntryPointCallFrame(candidate, (ushort)index);
+                    return true;
+                }
+                foreach (string import in candidate.Imports)
+                    if (tryFind(GetImportedModule(candidate, import), visited, out result)) return true;
+            }
+            result = default;
+            return false;
+        }
+    }
+
+    private NsArray EnsureArray(in ConstantValue value)
+    {
+        if (value.Array is { } existing) return existing;
+        var array = new NsArray(value);
+        if (value.GetSlotInfo(out short slot))
+        {
+            if (slot >= 0) GetVariable(slot) = value.WithArray(array);
+            else GetFlag(-slot - 2) = value.WithArray(array);
+        }
+        return array;
     }
 
     private static ConstantValue BinOp(

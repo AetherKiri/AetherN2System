@@ -19,6 +19,14 @@ internal sealed class AliasMap : EntityScope
         _aliases[alias] = entity;
     }
 
+    public void Remove(Entity entity)
+    {
+        var removed = new List<EntityAlias>();
+        foreach ((EntityAlias alias, Entity target) in _aliases)
+            if (ReferenceEquals(target, entity)) removed.Add(alias);
+        foreach (EntityAlias alias in removed) _aliases.Remove(alias);
+    }
+
     public void Query(EntityPattern pattern, ref SmallList<Entity> results)
     {
         if (!pattern.ContainsWildcard)

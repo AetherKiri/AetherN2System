@@ -28,7 +28,8 @@ public class QueryExecutionTests
     [MemberData(nameof(GetGoodQueryTestData))]
     public void Execute(string query, string[] expectedResults)
     {
-        var (process, mainThread) = (TestContext.MainProcess, TestContext.MainThread);
+        var context = new TestContext();
+        var (process, mainThread) = (context.MainProcess, context.MainThread);
         var world = new World(process, mainThread);
         var parsedQuery = EntityQuery.Parse(query);
         var foo1 = new TestEntity("foo1", mainThread);

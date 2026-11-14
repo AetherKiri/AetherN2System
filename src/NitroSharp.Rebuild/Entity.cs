@@ -56,6 +56,7 @@ internal abstract class Entity : EntityScope, EntityInternal, SmallLookupListEnt
 
     public bool IsEnabled { get; private set; }
     public bool IsLocked { get; private set; }
+    internal bool IsPendingDestruction { get; set; }
 
     public ref readonly SmallLookupList<EntityName, Entity> Children => ref _children;
 
@@ -142,7 +143,7 @@ internal abstract class Entity : EntityScope, EntityInternal, SmallLookupListEnt
 
         foreach (Entity child in _children)
         {
-            if (child.Name.Matches(pattern))
+            if (child is not CallScopeEntity && child.Name.Matches(pattern))
             {
                 results.Add(child);
             }

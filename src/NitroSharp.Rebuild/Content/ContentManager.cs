@@ -92,7 +92,8 @@ internal sealed class ContentManager : IDisposable
         _archiveLoadFuncs =
         [
             (file, names) => NpaFile.TryLoad(file, names, npaScheme),
-            AfsFile.TryLoad
+            AfsFile.TryLoad,
+            LegacyPakArchive.TryLoad
         ];
         if (mountPoints is not null)
         {
@@ -252,7 +253,7 @@ internal sealed class ContentManager : IDisposable
     private void TryAddMount(in MountPoint mountPoint)
     {
         VfsNode head = _root;
-        string[] pathParts = mountPoint.MountName.ToLowerInvariant().Split("/");
+        string[] pathParts = mountPoint.MountName.ToLowerInvariant().Split("/", StringSplitOptions.RemoveEmptyEntries);
         foreach (string part in pathParts)
         {
             head.Children ??= new Dictionary<string, VfsNode>();

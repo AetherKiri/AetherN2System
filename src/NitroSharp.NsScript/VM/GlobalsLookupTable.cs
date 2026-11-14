@@ -46,6 +46,29 @@ internal sealed class GlobalsLookupTable
     public FrozenDictionary<string, int> Variables => _allVariables.Value;
     public FrozenDictionary<string, int> Flags => _allFlags.Value;
 
+    private GlobalsLookupTable(Dictionary<string, int> variables, Dictionary<string, int> flags)
+    {
+        _stream = Stream.Null;
+        _nameHeapStart = 0;
+        _allVariables = new(() => variables.ToFrozenDictionary());
+        _allFlags = new(() => flags.ToFrozenDictionary());
+        _sysVariables = new();
+        _sysFlags = new();
+        foreach ((string name, int slot) in variables)
+            if (name.StartsWith("SYSTEM", StringComparison.Ordinal)) _sysVariables.Add(name, slot);
+        foreach ((string name, int slot) in flags)
+            if (name.StartsWith("SYSTEM", StringComparison.Ordinal)) _sysFlags.Add(name, slot);
+    }
+
+    internal GlobalsLookupTable WithGlobal(string name, bool flag)
+    {
+        var variables = new Dictionary<string, int>(Variables);
+        var flags = new Dictionary<string, int>(Flags);
+        Dictionary<string, int> target = flag ? flags : variables;
+        target.Add(name, target.Count);
+        return new GlobalsLookupTable(variables, flags);
+    }
+
     private FrozenDictionary<string, int> CreateLookup(int[] nameOffsets)
     {
         var lookup = new Dictionary<string, int>();

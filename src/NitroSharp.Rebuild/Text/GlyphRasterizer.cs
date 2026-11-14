@@ -101,7 +101,7 @@ internal sealed class GlyphRasterizer : IDisposable
         }
     }
 
-    public async Task AddFontAsync(string path)
+    public async Task<ImmutableArray<FontFaceKey>> AddFontAsync(string path)
     {
         if (_metricsContext.AddFont(path, out ImmutableArray<(FontFaceKey, FontFace)> faces))
         {
@@ -122,7 +122,7 @@ internal sealed class GlyphRasterizer : IDisposable
             }
         }
 
-        return;
+        return faces.Select(face => face.Item1).ToImmutableArray();
 
         Task loadAsync()
             => Task.WhenAll(_contexts.Select(x => Task.Run(() => x.AddFont(path, out _))));
@@ -136,6 +136,39 @@ internal sealed class GlyphRasterizer : IDisposable
         static FontData notFound(FontFaceKey key)
         {
             throw new ArgumentException($"Font '{key}' has not been loaded.");
+        }
+    }
+
+    internal FontFaceKey SelectDefaultFont(FontFaceKey preferred, IEnumerable<FontFaceKey> bundledFonts)
+    {
+        // VL Gothic covers Japanese well but omits common simplified Chinese
+        // characters. Prefer a bundled face with broader coverage when the
+        // profile did not explicitly choose its own font.
+        const string sample = "日本語あいうアイウ汉语简体龙马门车东风云书学国广齐军备枪漢體國龍한국어";
+        FontFaceKey best = preferred;
+        int bestCoverage = Coverage(preferred);
+        foreach (FontFaceKey candidate in bundledFonts.Distinct())
+        {
+            if (candidate.Style != FontStyle.Regular)
+                continue;
+            int coverage = Coverage(candidate);
+            if (coverage > bestCoverage)
+            {
+                best = candidate;
+                bestCoverage = coverage;
+            }
+        }
+        return best;
+
+        int Coverage(FontFaceKey key)
+        {
+            if (!_fontDatas.TryGetValue(key, out FontData? data))
+                return -1;
+            int count = 0;
+            foreach (Rune scalar in sample.EnumerateRunes())
+                if (data.GetGlyphIndex(scalar) != 0)
+                    count++;
+            return count;
         }
     }
 

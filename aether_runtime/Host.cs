@@ -173,6 +173,7 @@ internal static unsafe class Exports
     {
         string? file = FindFile(root, "aether-n2system.json") ?? FindFile(root, "profiles.json");
         JsonObjectBuilder builder = new(file);
+        PrepareLegacyScripts(builder, root, writable);
         ApplyKnownInstallDefaults(builder, root);
         builder.Default("startupScript", "boot.nss");
         builder.Default("product.name", Path.GetFileName(root));
@@ -224,6 +225,54 @@ internal static unsafe class Exports
         builder.Default("dev.npaScheme", extra ? "muramasa-ad" : "muramasa");
         builder.Default("dev.archiveEncoding", main && FindFile(root, "Muramasa_chs.exe") is not null ? "gbk" : "shift-jis");
         builder.Default("dev.scriptEncoding", main && FindFile(root, "Muramasa_chs.exe") is not null ? "gbk" : "shift-jis");
+        if (extra && FindFile(root, "MuramasaAD_cn.exe") is not null)
+        {
+            builder.Default("dev.dialogueEncoding", "gbk");
+            builder.Default("dev.dialogueVariables", "TITLE_NOW");
+        }
+    }
+
+    private static void PrepareLegacyScripts(JsonObjectBuilder builder, string root, string writable)
+    {
+        if (builder.EffectiveString("startupScript") is not null
+            || (FindFile(root, "game_cn.ini") ?? FindFile(root, "game.ini")) is null
+            || !IsLegacyPak(FindFile(root, "script.pak"))
+            || !IsLegacyPak(FindFile(root, "system.pak"))) return;
+
+        LegacyNpsInstallSettings install = LegacyNpsInstall.Prepare(root, writable);
+        builder.Default("startupScript", install.StartupScript);
+        builder.Default("dev.scriptRoot", install.ScriptRoot);
+        builder.Default("dev.contentRoot", install.ContentRoot);
+        builder.Default("dev.scriptEncoding", "utf-8");
+        builder.Default("dev.archiveEncoding", "shift-jis");
+        builder.Default("designResolution", $"{install.Width}x{install.Height}");
+        builder.Default("product.name", install.ProductName);
+        builder.Default("product.displayName", install.DisplayName);
+        builder.DefaultNode("font.size", System.Text.Json.Nodes.JsonValue.Create(install.FontSize)!);
+        builder.DefaultNode("dev.useUtf8", System.Text.Json.Nodes.JsonValue.Create(true)!);
+        var mounts = new System.Text.Json.Nodes.JsonArray();
+        foreach (MountPoint mount in install.Mounts)
+            mounts.Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+            {
+                ["archive"] = mount.ArchiveName,
+                ["mount"] = mount.MountName
+            });
+        builder.DefaultNode("dev.mounts", mounts);
+        foreach (string diagnostic in install.Diagnostics.Take(8))
+            Console.Error.WriteLine("[N2 legacy] " + diagnostic);
+        if (install.Diagnostics.Count > 8)
+            Console.Error.WriteLine($"[N2 legacy] {install.Diagnostics.Count - 8} additional compatibility notes; unsupported commands report their source and line when reached.");
+    }
+
+    private static bool IsLegacyPak(string? path)
+    {
+        if (path is null) return false;
+        using var stream = File.OpenRead(path);
+        if (stream.Length < 0x108) return false;
+        using var reader = new BinaryReader(stream);
+        if (reader.ReadUInt32() != 3) return false;
+        stream.Position = 0x104;
+        return reader.ReadUInt32() == 100;
     }
 
     private static void PreparePackedScripts(
@@ -444,6 +493,11 @@ internal sealed class JsonObjectBuilder
     }
 
     public string? String(string key) => _root[key]?.GetValue<string>();
+
+    public void DefaultNode(string key, System.Text.Json.Nodes.JsonNode value)
+    {
+        if (!_root.ContainsKey(key)) _root[key] = value;
+    }
 
     public void ResolveContentRoot(string root)
     {

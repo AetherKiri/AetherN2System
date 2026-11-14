@@ -22,6 +22,7 @@ public sealed class GameProfile
     public required bool SkipUpToDateCheck { get; init; }
 
     public required string FontFamily { get; init; }
+    internal bool HasExplicitFontFamily { get; private init; } = true;
     public required PtFontSize FontSize { get; init; }
 
     public required IconPathPatterns IconPathPatterns { get; init; }
@@ -30,6 +31,8 @@ public sealed class GameProfile
     public required MountPoint[]? MountPoints { get; init; }
     public string? ArchiveEncoding { get; init; }
     public string? ScriptEncoding { get; init; }
+    public string? DialogueEncoding { get; init; }
+    public string? DialogueVariables { get; init; }
     public string? NpaScheme { get; init; }
     internal string? WritableDirectory { get; set; }
 
@@ -74,6 +77,8 @@ public sealed class GameProfile
             MountPoints = mountPoints,
             ArchiveEncoding = getStringOpt("dev.archiveEncoding"),
             ScriptEncoding = getStringOpt("dev.scriptEncoding"),
+            DialogueEncoding = getStringOpt("dev.dialogueEncoding"),
+            DialogueVariables = getStringOpt("dev.dialogueVariables"),
             NpaScheme = getStringOpt("dev.npaScheme"),
             IconPathPatterns = new IconPathPatterns
             {
@@ -83,6 +88,7 @@ public sealed class GameProfile
                 BacklogVoice = new IconPathPattern(getString("icons.backlogVoice"))
             },
             FontFamily = getStringOpt("font.family") ?? "VL Gothic",
+            HasExplicitFontFamily = getStringOpt("font.family") is not null,
             FontSize = new PtFontSize(fontSize ?? 20)
         };
 

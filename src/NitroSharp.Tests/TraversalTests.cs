@@ -9,7 +9,8 @@ public class TraversalTests
     [Fact]
     public void NodesAreTraversedInDepthFirstOrder()
     {
-        var world = new World(TestContext.MainProcess, TestContext.MainThread);
+        var context = new TestContext();
+        var world = new World(context.MainProcess, context.MainThread);
         TestEntity a = world.AddEntity(new TestEntity("A", parent: null));
         TestEntity b = world.AddEntity(new TestEntity("B", parent: a));
         TestEntity d = world.AddEntity(new TestEntity("D", parent: b));

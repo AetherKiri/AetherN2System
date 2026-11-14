@@ -1,6 +1,8 @@
 using System;
 using System.Numerics;
 using NitroSharp.Common;
+using NitroSharp.Content;
+using NitroSharp.Graphics.Core;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.Primitives;
 using Veldrid;
@@ -27,7 +29,11 @@ internal abstract class RenderItem : Entity, IComparable<RenderItem>
     private Transform _transform = Transform.Default;
     private OpacityAnimation? _fadeAnimation;
     private MoveAnimation? _moveAnimation;
+    private BezierMoveAnimation? _bezierMoveAnimation;
     private ScaleAnimation? _scaleAnimation;
+    private RotationAnimation? _rotationAnimation;
+    private MaskTransition? _transition;
+    private bool _transitionActive;
 
     protected RenderItem(EntityName name, Entity? parent, int priority) : base(name, parent)
     {
@@ -73,7 +79,10 @@ internal abstract class RenderItem : Entity, IComparable<RenderItem>
     {
         AdvanceAnimation(ref _fadeAnimation, ctx.DeltaTime);
         AdvanceAnimation(ref _moveAnimation, ctx.DeltaTime);
+        AdvanceAnimation(ref _bezierMoveAnimation, ctx.DeltaTime);
         AdvanceAnimation(ref _scaleAnimation, ctx.DeltaTime);
+        AdvanceAnimation(ref _rotationAnimation, ctx.DeltaTime);
+        if (_transitionActive && _transition?.Update(ctx.DeltaTime) is false) _transitionActive = false;
 
         PerformLayout(ctx, null);
     }
@@ -106,13 +115,45 @@ internal abstract class RenderItem : Entity, IComparable<RenderItem>
         {
             AnimationKind.Fade => _fadeAnimation is not null,
             AnimationKind.Move => _moveAnimation is not null,
+            AnimationKind.BezierMove => _bezierMoveAnimation is not null,
             AnimationKind.Zoom => _scaleAnimation is not null,
+            AnimationKind.Rotate => _rotationAnimation is not null,
+            AnimationKind.Transition => _transitionActive,
             _ => false
         };
     }
 
+    public void BeginMaskTransition(AssetRef<Texture> mask, float source, float destination, float feather,
+        TimeSpan duration, NsEaseFunction ease)
+    {
+        _transition?.Dispose();
+        _transition = new MaskTransition(mask, source, destination, feather, duration, ease);
+        _transitionActive = duration > TimeSpan.Zero;
+    }
+
+    protected void PushQuad(RenderContext context, DrawBatch batch, in QuadPrimitive quad, Texture texture,
+        Texture alphaMask, Vector2 alphaMaskPosition, ScreenRectU? scissor)
+    {
+        if (_transition is { } transition && transition.ProgressValue < 1)
+        {
+            if (transition.ProgressValue <= 0) return;
+            if (transition.Mask is not { } mask) return;
+            batch.PushTransitionQuad(quad, texture, context.Content.Get(mask), transition.ProgressValue,
+                transition.Feather, FilterMode, scissor);
+        }
+        else batch.PushQuad(quad, texture, alphaMask, alphaMaskPosition, BlendMode, FilterMode, scissor);
+    }
+
+    public override void Dispose()
+    {
+        _transition?.Dispose();
+        _transition = null;
+        base.Dispose();
+    }
+
     public override void Move(RenderContext ctx, in NsCoordinate x, in NsCoordinate y, TimeSpan duration, NsEaseFunction easeFunction)
     {
+        _bezierMoveAnimation = null;
         if (duration > TimeSpan.Zero)
         {
             _moveAnimation = new MoveAnimation(this, Transform.Position, Point(ctx, x, y), duration, easeFunction);
@@ -121,6 +162,21 @@ internal abstract class RenderItem : Entity, IComparable<RenderItem>
         {
             _moveAnimation = null;
             Transform.Position = Point(ctx, x, y);
+        }
+    }
+
+    public override void BezierMove(in ProcessedBezierCurve curve, TimeSpan duration,
+        NsEaseFunction easeFunction)
+    {
+        _moveAnimation = null;
+        _bezierMoveAnimation = null;
+        if (curve.Segments.IsDefaultOrEmpty) return;
+        if (duration > TimeSpan.Zero)
+            _bezierMoveAnimation = new BezierMoveAnimation(this, curve, duration, easeFunction);
+        else
+        {
+            Vector2 destination = curve.Segments[^1].P3;
+            Transform.Position = new Vector3(destination, Transform.Position.Z);
         }
     }
 
@@ -135,6 +191,36 @@ internal abstract class RenderItem : Entity, IComparable<RenderItem>
             _fadeAnimation = null;
             Color.SetAlpha(dstOpacity);
         }
+    }
+
+    public void SetPivot(RenderContext ctx, NsCoordinate x, NsCoordinate y)
+    {
+        Vector2 current = Transform.Pivot ?? GetSize(ctx).ToVector2() * .5f;
+        Vector2 size = GetSize(ctx).ToVector2();
+        Transform.Pivot = new Vector2(Coordinate(x, current.X, size.X), Coordinate(y, current.Y, size.Y));
+
+        static float Coordinate(NsCoordinate coordinate, float current, float size) => coordinate switch
+        {
+            { Kind: NsCoordinateKind.Value, Value: var value } => value.isRelative ? current + value.pos : value.pos,
+            { Kind: NsCoordinateKind.Inherit } => current,
+            { Kind: NsCoordinateKind.Alignment, Alignment: NsAlignment.Center } => size * .5f,
+            { Kind: NsCoordinateKind.Alignment, Alignment: NsAlignment.Right or NsAlignment.Bottom } => size,
+            _ => 0
+        };
+    }
+
+    public override void Rotate(NsNumeric dstRotationX, NsNumeric dstRotationY, NsNumeric dstRotationZ,
+        TimeSpan duration, NsEaseFunction easeFunction)
+    {
+        Vector3 destination = Transform.Rotation;
+        dstRotationX.AssignTo(ref destination.X);
+        dstRotationY.AssignTo(ref destination.Y);
+        dstRotationZ.AssignTo(ref destination.Z);
+        _rotationAnimation = null;
+        if (duration > TimeSpan.Zero)
+            _rotationAnimation = new RotationAnimation(this, Transform.Rotation, destination, duration, easeFunction);
+        else
+            Transform.Rotation = destination;
     }
 
     public override void Scale(in Vector3 dstScale, TimeSpan duration, NsEaseFunction easeFunction)

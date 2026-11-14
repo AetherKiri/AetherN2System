@@ -238,6 +238,20 @@ internal sealed class DrawBatch(RenderContext context) : IDisposable
         );
     }
 
+    public void PushTransitionQuad(in QuadPrimitive quad, Texture texture, Texture mask,
+        float progress, float feather, FilterMode filterMode, ScreenRectU? scissor)
+    {
+        TransitionShaderResources resources = context.ShaderResources.Transition;
+        var parameters = new TransitionParameters(new Vector4(progress, feather, context.RenderScale, 0),
+            new Vector4(context.ViewportLeft, context.ViewportTop, 0, 0));
+        UpdateBuffer(resources.ProgressBuffer, parameters);
+        ViewProjection projection = Target.OrthoProjection;
+        PushQuad(quad, resources.Pipeline, new ResourceBindings(
+            new ResourceSetKey(projection.ResourceLayout, projection.Buffer.VdBuffer),
+            new ResourceSetKey(resources.InputLayout, texture, mask, context.GetSampler(filterMode)),
+            new ResourceSetKey(resources.ParamLayout, resources.ProgressBuffer.VdBuffer)), scissor);
+    }
+
     public void PushQuad(
         in QuadPrimitive quad,
         Pipeline pipeline,

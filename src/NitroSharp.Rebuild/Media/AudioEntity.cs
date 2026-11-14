@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using NitroSharp.NsScript;
+using NitroSharp.NsScript.VM;
 
 namespace NitroSharp.Media;
 
@@ -11,6 +12,10 @@ internal sealed class AudioEntity : Entity
     private readonly AudioContext _audioContext;
     private readonly PooledAudioSource _pooledSource;
     private readonly float _volumeMultiplier;
+    private readonly NsAudioKind _kind;
+    private NsScriptVM? _vm;
+    private float _systemGain = 1;
+    private float _appliedVolume = float.NaN;
     private MediaStream? _stream;
     private bool _playbackStarted;
     private bool _hasPlayed;
@@ -28,11 +33,14 @@ internal sealed class AudioEntity : Entity
         Entity? parent,
         Func<Stream> openStream,
         AudioContext audioContext,
-        NsAudioKind kind)
+        NsAudioKind kind,
+        NsScriptVM? vm = null)
         : base(name, parent)
     {
         _openStream = openStream;
         _audioContext = audioContext;
+        _kind = kind;
+        _vm = vm;
         _volumeMultiplier = kind switch
         {
             NsAudioKind.BackgroundMusic => 0.7f,
@@ -44,6 +52,7 @@ internal sealed class AudioEntity : Entity
         {
             _stream = OpenMedia();
             Duration = _stream.Duration;
+            if (vm is not null) _systemGain = SystemAudioSettings.GetGain(vm, kind);
             ApplyVolume();
         }
         catch
@@ -106,6 +115,7 @@ internal sealed class AudioEntity : Entity
 
     private void Play()
     {
+        if (_vm is not null) UpdateSystemGain(_vm);
         if (_playbackStarted && _stream is { IsPlaying: false })
             Stop();
         _stream ??= OpenMedia();
@@ -153,7 +163,18 @@ internal sealed class AudioEntity : Entity
         }
     }
 
-    public override void Update(GameContext ctx) => AdvanceVolume(ctx.DeltaTime);
+    public override void Update(GameContext ctx)
+    {
+        UpdateSystemGain(ctx.VM);
+        AdvanceVolume(ctx.DeltaTime);
+    }
+
+    internal void UpdateSystemGain(NsScriptVM vm)
+    {
+        _vm = vm;
+        _systemGain = SystemAudioSettings.GetGain(vm, _kind);
+        ApplyVolume();
+    }
 
     internal void AdvanceVolume(float milliseconds)
     {
@@ -166,7 +187,13 @@ internal sealed class AudioEntity : Entity
         ApplyVolume();
     }
 
-    private void ApplyVolume() => _pooledSource.Value.Volume = _volume * _volumeMultiplier;
+    private void ApplyVolume()
+    {
+        float volume = _volume * _volumeMultiplier * _systemGain;
+        if (volume == _appliedVolume) return;
+        _pooledSource.Value.Volume = volume;
+        _appliedVolume = volume;
+    }
 
     public override void Dispose()
     {

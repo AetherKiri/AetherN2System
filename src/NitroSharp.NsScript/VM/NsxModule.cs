@@ -77,6 +77,8 @@ public sealed class NsxModule
     }
 
     public string Name { get; }
+    internal string[] SourceScopes { get; set; } = [];
+    internal IReadOnlyDictionary<string, NsxModule>? ScopedModules { get; set; }
     public string[] Imports { get; }
     public DateTimeOffset SourceModificationTime { get; }
     public ReadOnlySpan<byte> Code => _codeSection;
@@ -313,7 +315,12 @@ public readonly struct Subroutine
         }
 
         BytecodeStart = subStart + reader.Position;
-        _bytecode = codeSection.AsMemory(BytecodeStart, size);
+        // The stored size starts after the size field and includes the dialogue
+        // count and offsets. BytecodeStart is already past that table.
+        int bytecodeSize = size - (reader.Position - sizeof(ushort));
+        if (bytecodeSize < 0)
+            throw new InvalidDataException("Subroutine size is smaller than its dialogue offset table.");
+        _bytecode = codeSection.AsMemory(BytecodeStart, bytecodeSize);
         var dialogueBlocks = ImmutableArray.CreateBuilder<CompiledDialogueBlock>(dialogueBlockCount);
         for (int i = 0; i < dialogueBlockCount; i++)
         {

@@ -38,12 +38,14 @@ internal sealed class InputContext(GameWindow window) : IDisposable
 
     private float GetActionValue(InputAction action) => _actionValues[(int)action];
     private bool IsActionDown(InputAction action) => _actionDown[(int)action];
+    internal bool IsActionHeld(InputAction action) => IsActionDown(action);
     private bool IsActionTriggered(InputAction action) => _actionTriggered[(int)action];
 
     internal Vector2 MousePosition => Snapshot.MousePosition;
     internal bool IsMouseButtonDown(MouseButton button) => Snapshot.IsMouseDown(button);
     internal bool WasActionTriggered(InputAction action) => _actionTriggered[(int)action];
     internal bool PointerMoved { get; private set; }
+    internal bool PointerHeld => Snapshot.MouseState(MouseButton.Left) || Snapshot.ActiveTouches.Count > 0;
     internal bool ChoicePointerPressed => !_choicePressConsumed
         && (Snapshot.IsMouseDown(MouseButton.Left) || Snapshot.IsTouchDown);
 
@@ -63,6 +65,14 @@ internal sealed class InputContext(GameWindow window) : IDisposable
         bool result = _actionTriggered[index];
         _actionTriggered[index] = false;
         return result;
+    }
+
+    internal bool ConsumeFrameSequenceInterrupt()
+    {
+        bool advance = Consume(InputAction.Advance);
+        bool rightClick = Snapshot.IsMouseDown(MouseButton.Right);
+        if (rightClick) Consume(InputAction.Back);
+        return advance || rightClick || Snapshot.KeyState(Key.LeftShift) || Snapshot.KeyState(Key.RightShift);
     }
 
     public void Update(GameWindow window, SystemVariableLookup systemVariables)

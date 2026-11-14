@@ -122,5 +122,18 @@ public enum BuiltInFunction : byte
     fail,
     fail_msg,
     Count,
-    VariableValue
+    VariableValue,
+    Array,
+    AssocArray,
+    Strstr,
+    LegacyUnsupported,
+
+    Twitter_Init,
+    Twitter_CheckAcount,
+    Twitter_InputAcount,
+    Twitter_SetAcount,
+    Twitter_InputTweet,
+    Twitter_Tweet,
+    CreateFrameAnimation,
+    WaitFrameAnimation
 }

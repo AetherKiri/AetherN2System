@@ -102,9 +102,10 @@ internal sealed class TextRenderContext : IDisposable
         in Matrix4x4 transform,
         Vector2 offset,
         in ScreenRectU rect,
-        float opacity)
+        float opacity,
+        bool verticalGlyphs = false)
     {
-        Render(ctx, drawBatch, layout, layout.GlyphRuns, transform, offset, rect, opacity);
+        Render(ctx, drawBatch, layout, layout.GlyphRuns, transform, offset, rect, opacity, verticalGlyphs);
     }
 
     public void Render(
@@ -115,10 +116,11 @@ internal sealed class TextRenderContext : IDisposable
         in Matrix4x4 transform,
         Vector2 offset,
         in ScreenRectU rect,
-        float opacity)
+        float opacity,
+        bool verticalGlyphs = false)
     {
         var span = MemoryMarshal.CreateReadOnlySpan(ref glyphRun, 1);
-        Render(ctx, drawBatch, layout, span, transform, offset, rect, opacity);
+        Render(ctx, drawBatch, layout, span, transform, offset, rect, opacity, verticalGlyphs);
     }
 
     private void Render(
@@ -129,7 +131,8 @@ internal sealed class TextRenderContext : IDisposable
         in Matrix4x4 transform,
         Vector2 offset,
         in ScreenRectU rect,
-        float opacity)
+        float opacity,
+        bool verticalGlyphs)
     {
         Matrix4x4 finalTransform = Matrix4x4.CreateTranslation(new Vector3(offset, 0)) * transform;
         TextShaderResources shaderResources = ctx.ShaderResources.Text;
@@ -138,7 +141,7 @@ internal sealed class TextRenderContext : IDisposable
             ref readonly GlyphRun glyphRun = ref glyphRuns[i];
             ReadOnlySpan<PositionedGlyph> glyphs = layout.Glyphs[glyphRun.GlyphSpan];
             ReadOnlySpan<float> opacityValues = layout.GetOpacityValues(glyphRun.GlyphSpan);
-            if (AppendRun(glyphRun, glyphs, opacityValues, finalTransform, opacity) is { } gpuGlyphSlice)
+            if (AppendRun(glyphRun, glyphs, opacityValues, finalTransform, opacity, verticalGlyphs) is { } gpuGlyphSlice)
             {
                 _pendingDraws.Add() = (new Draw
                 {
@@ -215,7 +218,8 @@ internal sealed class TextRenderContext : IDisposable
         ReadOnlySpan<PositionedGlyph> positionedGlyphs,
         ReadOnlySpan<float> opacityValues,
         in Matrix4x4 transform,
-        float opacityMultiplier)
+        float opacityMultiplier,
+        bool verticalGlyphs)
     {
         var gpuGlyphRun = new GpuGlyphRun(run.Color, run.OutlineColor);
         GpuCacheHandle glyphRunHandle = _gpuGlyphRuns.Insert(ref gpuGlyphRun);
@@ -237,6 +241,18 @@ internal sealed class TextRenderContext : IDisposable
                 Debug.Assert(cachedGlyph.Kind != GlyphCacheEntryKind.Pending);
                 if (cachedGlyph.Kind == GlyphCacheEntryKind.Blank) { continue; }
                 TextureCacheItem glyphCacheItem = _textureCache.Get(cachedGlyph.TextureCacheHandle);
+                int transformId = glyphRunId;
+                if (verticalGlyphs && VerticalGlyphOrientation.IsUpright(glyph.Scalar))
+                {
+                    GlyphDimensions dimensions = fontData.GetGlyphDimensions(glyph.Index, run.FontSize);
+                    Matrix4x4 local = VerticalGlyphOrientation.GetLocalTransform(glyph.Scalar,
+                        glyph.Position, new Vector2(dimensions.Width, dimensions.Height), run.FontSize.ToFloat());
+                    var verticalTransform = new GpuTransform(local * transform);
+                    GpuCacheHandle colorHandle = _gpuGlyphRuns.Insert(ref gpuGlyphRun);
+                    GpuCacheHandle verticalHandle = _gpuTransforms.Insert(ref verticalTransform);
+                    transformId = _gpuGlyphRuns.GetCachePosition(colorHandle);
+                    Debug.Assert(_gpuTransforms.GetCachePosition(verticalHandle) == transformId);
+                }
                 int outlineId = 0;
                 if (cachedGlyph.OutlineTextureCacheHandle.IsValid)
                 {
@@ -247,7 +263,7 @@ internal sealed class TextRenderContext : IDisposable
                 (buffer, _) = _gpuGlyphs.Append(new GpuGlyph
                 {
                     Offset = glyph.Position,
-                    GlyphRunId = glyphRunId,
+                    GlyphRunId = transformId,
                     GlyphId = glyphCacheItem.UvRectPosition,
                     OutlineId = outlineId,
                     Opacity = opacityValues[i] * opacityMultiplier

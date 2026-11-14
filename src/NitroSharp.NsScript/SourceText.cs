@@ -33,7 +33,8 @@ public sealed class SourceText
     public int LineCount => _lineStarts.Count;
 
     public static SourceText From(string text) => new(text, new ResolvedPath(string.Empty));
-    public static SourceText From(Stream stream, ResolvedPath filePath, Encoding? encoding = null)
+    public static SourceText From(Stream stream, ResolvedPath filePath, Encoding? encoding = null,
+        SourceTextDecodingOptions? decodingOptions = null)
     {
         if (!stream.CanRead)
         {
@@ -42,7 +43,24 @@ public sealed class SourceText
 
         encoding ??= CharsetDetector.DetectFromStream(stream).Detected?.Encoding ?? Encoding.UTF8;
         stream.Seek(0, SeekOrigin.Begin);
-        string text = ReadStream(stream, encoding);
+        string text;
+        if (decodingOptions is not null && encoding.CodePage is not (65001 or 1200 or 1201 or 12000 or 12001))
+        {
+            using var buffer = new MemoryStream();
+            stream.CopyTo(buffer);
+            byte[] bytes = buffer.ToArray();
+            bool hasBom = bytes.AsSpan().StartsWith(new byte[] { 0xef, 0xbb, 0xbf })
+                || bytes.AsSpan().StartsWith(new byte[] { 0xff, 0xfe })
+                || bytes.AsSpan().StartsWith(new byte[] { 0xfe, 0xff })
+                || bytes.AsSpan().StartsWith(new byte[] { 0, 0, 0xfe, 0xff });
+            if (hasBom)
+            {
+                using var bomStream = new MemoryStream(bytes);
+                text = ReadStream(bomStream, encoding);
+            }
+            else text = new MixedScriptDecoder(bytes, encoding, decodingOptions).Decode();
+        }
+        else text = ReadStream(stream, encoding);
         return new SourceText(text, filePath);
     }
 

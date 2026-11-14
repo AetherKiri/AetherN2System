@@ -33,6 +33,7 @@ internal struct CallFrame(NsxModule module, ushort subroutineIndex, CodeOffset p
 
     public CodeOffset ProgramCounter = pc;
     public int? EndPosition;
+    public bool HasCallScope;
 
     public ref readonly SubroutineRuntimeInfo RuntimeInfo =>
         ref Module.GetSubroutineRuntimeInfo(SubroutineIndex);

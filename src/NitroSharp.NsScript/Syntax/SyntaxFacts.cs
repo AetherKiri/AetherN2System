@@ -243,6 +243,8 @@ public static class SyntaxFacts
 
             // compound
             SyntaxTokenKind.BarBar => "||",
+            SyntaxTokenKind.OpenBracket => "[",
+            SyntaxTokenKind.CloseBracket => "]",
             SyntaxTokenKind.AmpersandAmpersand => "&&",
             SyntaxTokenKind.MinusMinus => "--",
             SyntaxTokenKind.PlusPlus => "++",

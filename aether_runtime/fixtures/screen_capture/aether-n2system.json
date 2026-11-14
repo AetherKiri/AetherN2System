@@ -1,0 +1,9 @@
+{
+  "product.name": "Aether N2 screen capture fixture",
+  "product.displayName": "Aether N2 screen capture fixture",
+  "designResolution": "320x180",
+  "startupScript": "boot.nss",
+  "dev.contentRoot": ".",
+  "dev.scriptRoot": "nss",
+  "dev.useUtf8": true
+}

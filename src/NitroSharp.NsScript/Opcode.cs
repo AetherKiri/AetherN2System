@@ -28,6 +28,9 @@ public enum Opcode : byte
     Binary = 0x22,          // <byte operator>
 
     Pop = 0x23,             // <>
+    EnsureArray = 0x24,     // <>
+    LoadIndex = 0x25,       // <>
+    StoreIndex = 0x26,      // <byte assignment operator>
 
     Jump = 0x30,            // <short offset>
     JumpIfTrue = 0x31,      // <short offset>
@@ -38,6 +41,7 @@ public enum Opcode : byte
     CallChapter = 0x36,     // <ushort module>
     CallScene = 0x37,       // <ushort module> <ushort scene>
     Return = 0x38,          // <>
+    CallSceneDynamic = 0x39, // <> target path on the evaluation stack
 
     SelectLoopStart = 0x40, // <>
     IsPressed = 0x41,       // <ushort token>
@@ -46,6 +50,7 @@ public enum Opcode : byte
     BezierStart = 0x44,     // <>
     BezierEndSeg = 0x45,    // <>
     BezierEnd = 0x46,       // <>
+    IsPressedDynamic = 0x47, // <> entity query on the evaluation stack
 
     ActivateBlock = 0x50,   // <>
 }

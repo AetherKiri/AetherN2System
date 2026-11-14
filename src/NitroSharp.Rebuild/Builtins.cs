@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using NitroSharp.Common;
+using NitroSharp.Content;
 using NitroSharp.Graphics;
 using NitroSharp.Input;
 using NitroSharp.Media;
@@ -24,6 +26,9 @@ internal sealed class Builtins : BuiltInFunctions
     private readonly World _world;
     private readonly Log _log;
     private readonly Dictionary<Thread, ChoiceInputState> _choiceInputs = [];
+    private Scrollbar? _focusedScrollbar;
+    private Scrollbar? _draggedScrollbar;
+    private bool _twitterUnavailableReported;
 
     private sealed class ChoiceInputState
     {
@@ -62,9 +67,28 @@ internal sealed class Builtins : BuiltInFunctions
         return default!;
     }
 
+    public override void ReportInvalidArgument(string functionName, string argumentName, in ConstantValue value)
+        => _log.Warn($"Thread '{CurrentThread.Name.ToString()}' | {functionName}: invalid {argumentName} argument {value.ToString()}; retaining the current value");
+
+    public override void EnterCallScope() => CurrentThread.EnterCallScope();
+    public override void LeaveCallScope() => CurrentThread.LeaveCallScope();
+
     public override void Exit() => _ctx.ShutdownSignal.Cancel();
 
     public override int GetPlatformId() => 100;
+
+    public override string GetCurrentModuleName()
+        => CurrentModule.Name.EndsWith(".nss", StringComparison.OrdinalIgnoreCase)
+            ? CurrentModule.Name : CurrentModule.Name + ".nss";
+
+    public override int GetSecondsElapsed() => (int)Clock.Elapsed.TotalSeconds;
+
+    public override void InitializeTwitter(string writablePath)
+    {
+        if (_twitterUnavailableReported) return;
+        _twitterUnavailableReported = true;
+        _log.Info("Twitter integration is unavailable; account and tweet operations stay offline.");
+    }
 
     public override void CreateEntity(in EntityPath entityPath)
     {
@@ -91,6 +115,53 @@ internal sealed class Builtins : BuiltInFunctions
         }
     }
 
+    public override void CreateEffect(in EntityPath entityPath, int priority, NsCoordinate x, NsCoordinate y,
+        uint width, uint height, string effectName)
+    {
+        if (!effectName.Equals("Plain", StringComparison.OrdinalIgnoreCase))
+        {
+            _log.Warn($"Thread '{CurrentThread.Name.Value}' | CreateEffect '{effectName}' is not implemented");
+            return;
+        }
+        if (!ResolveEntityPath(entityPath, out EntityName name, out Entity? parent)) return;
+        RenderContext render = _ctx.RenderContext;
+        var effect = new PlainEffect(name, parent, priority, new DesignSizeU(width, height),
+            rectangle => render.CapturePresentedFrame(rectangle),
+            texture => render.GraphicsDevice.DisposeWhenIdle(texture))
+            .WithPosition(render, x, y);
+        effect.RefreshSnapshot();
+        _world.AddEntity(effect);
+    }
+
+    public override void CreateFrameAnimation(in EntityPath path, int priority, NsCoordinate x, NsCoordinate y,
+        ReadOnlySpan<string> frames, int ticksPerFrame, string finalFrame, bool removeOnCompletion, bool loop, bool wait)
+    {
+        if (!ResolveEntityPath(path, out EntityName name, out Entity? parent)) return;
+        var assets = new List<AssetRef<Texture>>();
+        var sequence = new FrameSequence(name, parent, priority, frames, ticksPerFrame, finalFrame,
+            removeOnCompletion, loop,
+            source =>
+            {
+                if (_ctx.Content.RequestTexture(source) is not { } asset) return null;
+                assets.Add(asset);
+                return SpriteTexture.FromAsset(asset);
+            },
+            completed => { if (completed.RemoveOnCompletion) _world.DestroyEntity(completed); },
+            ready: () =>
+            {
+                foreach (AssetRef<Texture> asset in assets)
+                    if (_ctx.Content.TryGet(asset) is null) return false;
+                return true;
+            });
+        try { sequence.WithPosition(_ctx.RenderContext, x, y); }
+        catch { sequence.Dispose(); throw; }
+        _world.AddEntity(sequence);
+        if (wait) WaitFrameAnimation(EntityQuery.Parse(path.ToString()));
+    }
+
+    public override void WaitFrameAnimation(in EntityQuery query)
+        => CurrentThread.WaitForFrameSequence(query);
+
     public override void CreateSpriteEx(in EntityPath entityPath, int priority, NsCoordinate x, NsCoordinate y, uint srcX, uint srcY, uint width, uint height, string source)
     {
         if (ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
@@ -103,6 +174,11 @@ internal sealed class Builtins : BuiltInFunctions
 
     private SpriteTexture GetSpriteTexture(string source, DesignRectU? sourceRect = null)
     {
+        if (source.Equals("SCREEN", StringComparison.OrdinalIgnoreCase)
+            || source.Equals("VIDEO", StringComparison.OrdinalIgnoreCase))
+        {
+            return _ctx.RenderContext.CapturePresentedFrame(sourceRect);
+        }
         if (_ctx.Content.RequestTexture(source) is { } assetRef)
         {
             return SpriteTexture.FromAsset(assetRef, sourceRect);
@@ -142,6 +218,7 @@ internal sealed class Builtins : BuiltInFunctions
         _world.CurrentProcess.FontSettings = _world.CurrentProcess.FontSettings with
         {
             DefaultFontSize = new PtFontSize(size),
+            VerticalGlyphs = family.StartsWith('@'),
             DefaultTextColor = color.ToRgbaFloat().ToVector4(),
             DefaultOutlineColor = outlineOffset != NsOutlineOffset.Unspecified
                 ? outlineColor.ToRgbaFloat().ToVector4() : null
@@ -192,6 +269,47 @@ internal sealed class Builtins : BuiltInFunctions
             : 0;
     }
 
+    public override Vector2 GetPosition(in EntityQuery query)
+    {
+        foreach (Entity entity in Query(query))
+            if (entity is RenderItem visual)
+                return new Vector2(visual.Transform.Position.X, visual.Transform.Position.Y);
+        return Vector2.Zero;
+    }
+
+    public override Vector2 GetCursorPosition()
+        => Scrollbar.ToDesignPosition(_ctx.RenderContext, _ctx.InputContext.MousePosition);
+
+    public override void CreateScrollbar(in EntityPath path, int priority, int x1, int y1,
+        int x2, int y2, NsRational initialValue, NsScrollDirection scrollDirection, string knobImage)
+    {
+        if (ResolveEntityPath(path, out EntityName name, out Entity? parent))
+            _world.AddEntity(new Scrollbar(name, parent, priority, GetSpriteTexture(knobImage),
+                new Vector2(x1, y1), new Vector2(x2, y2), scrollDirection, initialValue.Rebase(1)));
+    }
+
+    public override float GetScrollbarValue(in EntityQuery scrollbarEntity)
+    {
+        foreach (Entity entity in Query(scrollbarEntity))
+            if (entity is Scrollbar scrollbar) return scrollbar.Value;
+        return 0;
+    }
+
+    public override void SetScrollbar(in EntityQuery scrollbar, in EntityQuery parent)
+    {
+        Entity? target = null;
+        foreach (Entity entity in Query(parent)) { target = entity; break; }
+        foreach (Entity entity in Query(scrollbar))
+            if (entity is Scrollbar bar) bar.ScrollTarget = target;
+    }
+
+    public override void SetScrollSpeed(in EntityQuery query, float speed)
+    {
+        foreach (Entity entity in Query(query))
+            if (entity is Scrollbar scrollbar)
+                scrollbar.ScrollSpeed = float.IsFinite(speed) ? Math.Max(0, speed) : 0;
+    }
+
     public override int GetSoundAmplitude(string characterName)
     {
         return 0;
@@ -240,6 +358,11 @@ internal sealed class Builtins : BuiltInFunctions
         long frame = _ctx.FrameStamp.FrameId;
         foreach (Entity entity in Query(uiElementPath))
         {
+            if (entity is Scrollbar scrollbar)
+            {
+                if (HandleScrollbar(scrollbar)) return true;
+                continue;
+            }
             ChoiceEntity? choice = ChoiceEntity.FindOwner(entity);
             if (choice is null || !choice.IsAttached || !choice.IsClickable
                 || choice.GetHitTarget() is not { } hitTarget) continue;
@@ -264,6 +387,7 @@ internal sealed class Builtins : BuiltInFunctions
             if ((pointerPress || confirmPress)
                 && _ctx.InputContext.ConsumeChoicePress(pointerPress))
             {
+                _focusedScrollbar = null;
                 FocusChoice(input, choice);
                 choice.ShowState(MouseState.Down);
                 return true;
@@ -283,6 +407,45 @@ internal sealed class Builtins : BuiltInFunctions
                 }
             }
             choice.ShowState(ReferenceEquals(input.Focused, choice) ? MouseState.Over : MouseState.Normal);
+        }
+        return false;
+    }
+
+    private bool HandleScrollbar(Scrollbar scrollbar)
+    {
+        if (!scrollbar.IsAttached) return false;
+        if (_draggedScrollbar is not { IsAttached: true, IsDragging: true })
+            _draggedScrollbar = null;
+        Vector2 pointer = Scrollbar.ToDesignPosition(_ctx.RenderContext, _ctx.InputContext.MousePosition);
+        DesignSize size = scrollbar.GetSize(_ctx.RenderContext);
+        bool hovered = scrollbar.ContainsTrack(pointer, size.ToVector2());
+        for (Entity? parent = scrollbar.Parent; hovered && parent is not null; parent = parent.Parent)
+            if (parent is ConstraintBox constraint && !ContainsPoint(constraint, _ctx.InputContext.MousePosition))
+                hovered = false;
+        if (hovered && _ctx.InputContext.ChoicePointerPressed && _draggedScrollbar is null
+            && _ctx.InputContext.ConsumeChoicePress(pointer: true))
+        {
+            _focusedScrollbar = _draggedScrollbar = scrollbar;
+            scrollbar.BeginDrag(pointer, size.ToVector2());
+            if (!_ctx.InputContext.PointerHeld) scrollbar.EndDrag();
+            return true;
+        }
+        if (ReferenceEquals(_draggedScrollbar, scrollbar))
+        {
+            scrollbar.Drag(pointer);
+            return true;
+        }
+        if (hovered || ReferenceEquals(_focusedScrollbar, scrollbar))
+        {
+            int direction = 0;
+            if (_ctx.InputContext.Consume(InputAction.Up) || _ctx.InputContext.Consume(InputAction.Left)) direction--;
+            if (_ctx.InputContext.Consume(InputAction.Down) || _ctx.InputContext.Consume(InputAction.Right)) direction++;
+            if (direction != 0)
+            {
+                _focusedScrollbar = scrollbar;
+                scrollbar.Step(direction);
+                return true;
+            }
         }
         return false;
     }
@@ -350,7 +513,8 @@ internal sealed class Builtins : BuiltInFunctions
             () => OpenAudioStream(fileName)
                 ?? throw new FileNotFoundException("Audio file could not be opened.", fileName),
             _ctx.AudioContext,
-            kind
+            kind,
+            _ctx.VM
         ));
     }
 
@@ -394,7 +558,6 @@ internal sealed class Builtins : BuiltInFunctions
     {
         if (ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
         {
-            parent = _world.CurrentProcess;
             NsScriptThreadState? vmState = VM.CreateThread(CurrentModule.Name, target);
             if (vmState.HasValue)
             {
@@ -419,7 +582,7 @@ internal sealed class Builtins : BuiltInFunctions
         waitTimeout = AdjustDuration(waitTimeout);
         foreach (Entity entity in Query(query))
         {
-            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: true))
+            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: false))
             {
                 node.Move(_ctx.RenderContext, dstX, dstY, duration, easeFunction);
             }
@@ -434,7 +597,7 @@ internal sealed class Builtins : BuiltInFunctions
         waitTimeout = AdjustDuration(waitTimeout);
         foreach (Entity entity in Query(query))
         {
-            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: true))
+            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: false))
             {
                 node.Fade(dstOpacity, duration, easeFunction);
             }
@@ -454,6 +617,89 @@ internal sealed class Builtins : BuiltInFunctions
         }
 
         WaitOpt(Thread.WaitCondition.ZoomCompleted, query, waitTimeout);
+    }
+
+    public override void SetVertex(in EntityQuery query, NsCoordinate x, NsCoordinate y)
+    {
+        foreach (Entity entity in Query(query))
+            if (entity is RenderItem visual)
+                visual.SetPivot(_ctx.RenderContext, x, y);
+    }
+
+    public override void Rotate(in EntityQuery query, TimeSpan duration,
+        NsNumeric dstRotationX, NsNumeric dstRotationY, NsNumeric dstRotationZ,
+        NsEaseFunction easeFunction, TimeSpan waitTimeout)
+    {
+        duration = AdjustDuration(duration);
+        waitTimeout = AdjustDuration(waitTimeout);
+        foreach (Entity entity in Query(query))
+            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: false))
+                node.Rotate(dstRotationX, dstRotationY, dstRotationZ, duration, easeFunction);
+        WaitOpt(Thread.WaitCondition.RotateCompleted, query, waitTimeout);
+    }
+
+    public override void BezierMove(in EntityQuery query, TimeSpan duration,
+        CompositeBezier curve, NsEaseFunction easeFunction, bool wait)
+    {
+        duration = AdjustDuration(duration);
+        foreach (Entity entity in Query(query))
+        {
+            foreach (Entity child in entity.DescendantsAndSelf())
+            {
+                if (child is not RenderItem visual) continue;
+                var segments = ImmutableArray.CreateBuilder<ProcessedBezierSegment>(curve.Segments.Length);
+                foreach (CubicBezierSegment segment in curve.Segments)
+                    segments.Add(new ProcessedBezierSegment(
+                        Point(segment.P0), Point(segment.P1), Point(segment.P2), Point(segment.P3)));
+                visual.BezierMove(new ProcessedBezierCurve(segments.MoveToImmutable()), duration, easeFunction);
+
+                Vector2 Point(BezierControlPoint point)
+                {
+                    Vector3 position = visual.Point(_ctx.RenderContext, point.X, point.Y);
+                    return new Vector2(position.X, position.Y);
+                }
+            }
+        }
+        WaitOpt(Thread.WaitCondition.BezierMoveCompleted, query, wait ? duration : TimeSpan.Zero);
+    }
+
+    public override void BoxBlur(in EntityQuery query, uint nbPasses)
+    {
+        if (nbPasses > 16) throw new ArgumentOutOfRangeException(nameof(nbPasses));
+        foreach (Entity entity in Query(query))
+            foreach (Entity node in entity.DescendantsAndSelf())
+                if (node is PlainEffect plain) plain.SetBlur(nbPasses);
+                else if (node is Sprite sprite) sprite.SetBlur(nbPasses);
+                else if (node is RenderItem)
+                    throw new NotSupportedException($"SetShade does not support {node.GetType().Name}.");
+    }
+
+    public override void BeginTransition(in EntityQuery query, TimeSpan duration, NsRational srcFadeAmount,
+        NsRational dstFadeAmount, NsRational feather, NsEaseFunction easeFunction, string maskFileName, TimeSpan waitTimeout)
+    {
+        float source = srcFadeAmount, destination = dstFadeAmount, softness = feather;
+        if (!float.IsFinite(source) || !float.IsFinite(destination) || !float.IsFinite(softness)
+            || source < 0 || source > 1 || destination < 0 || destination > 1 || softness < 0 || softness > 1)
+            throw new ArgumentOutOfRangeException(nameof(srcFadeAmount), "Transition amounts and feather must be between zero and one.");
+        var targets = new HashSet<RenderItem>();
+        foreach (Entity entity in Query(query))
+            foreach (Entity node in entity.DescendantsAndSelf())
+                if (node is RenderItem visual)
+                {
+                    if (visual is not (Sprite or SolidColorRect or PlainEffect or FrameSequence) || visual.BlendMode != BlendMode.Alpha)
+                        throw new NotSupportedException($"Mask transition does not support {visual.GetType().Name} with {visual.BlendMode} blending.");
+                    targets.Add(visual);
+                }
+        if (targets.Count == 0)
+        {
+            _log.Warn($"Mask transition query '{query.ToString()}' matched no renderable entities.");
+            return;
+        }
+        using var mask = _ctx.Content.RequestTexture(maskFileName)
+            ?? throw new FileNotFoundException("Transition mask was not found.", maskFileName);
+        foreach (RenderItem target in targets)
+            target.BeginMaskTransition(mask.Clone(), source, destination, softness, AdjustDuration(duration), easeFunction);
+        WaitOpt(Thread.WaitCondition.TransitionCompleted, query, AdjustDuration(waitTimeout));
     }
 
     private void WaitOpt(Thread.WaitCondition condition, in EntityQuery query, TimeSpan timeout)

@@ -31,6 +31,7 @@ public enum NsEntityAction
     NoTextAnimation,
 
     Other,
+    Passive,
 }
 
 public enum NsEaseFunction

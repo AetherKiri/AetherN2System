@@ -75,7 +75,9 @@ public enum SyntaxTokenKind : byte
     DialogueBlockIdentifier,
     Markup,
     MarkupBlankLine,
-    EndOfFile
+    EndOfFile,
+    OpenBracket,
+    CloseBracket
 }
 
 public enum SigilKind

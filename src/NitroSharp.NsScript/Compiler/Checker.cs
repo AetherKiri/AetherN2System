@@ -151,15 +151,14 @@ namespace NitroSharp.NsScript.Compiler
 
         public LookupResult LookupNonInvocableSymbol(NameExpression name)
         {
-            if (name.Sigil == SigilKind.Dollar || context.TryGetVariableToken(name.Name, out _))
-            {
-                return new LookupResult(LookupResultVariant.Variable, name.Name);
-            }
             if (name.Sigil == SigilKind.Hash)
             {
                 return new LookupResult(LookupResultVariant.Flag, name.Name);
             }
-
+            if (name.Sigil == SigilKind.Dollar || context.TryGetVariableToken(name.Name, out _))
+            {
+                return new LookupResult(LookupResultVariant.Variable, name.Name);
+            }
             BuiltInConstant? builtInConstant = WellKnownSymbols.LookupBuiltInConstant(name.Name);
             if (builtInConstant.HasValue)
             {

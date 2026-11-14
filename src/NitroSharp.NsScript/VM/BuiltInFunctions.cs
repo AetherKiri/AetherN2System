@@ -34,15 +34,38 @@ public abstract class BuiltInFunctions
 
     public virtual string GetCurrentModuleName() => NotImplemented<string>();
     public virtual int GetSoundAmplitude(string characterName) => NotImplemented<int>();
-    public virtual int Count(in ConstantValue value) => value.IsNull ? 0 : 0;
-    public virtual bool VariableValue(ReadOnlySpan<ConstantValue> arguments) => false;
+    public virtual void LegacyUnsupported(string source, int line, string command)
+        => throw new NotSupportedException($"{source}:{line}: unsupported legacy NPS command {command}.");
+
+    // The hosted runtime has no Twitter client or account dialogs. A negative
+    // account status means unavailable; false means canceled input or failed send.
+    // Keep these typed results so the game's own offline/error branches can run.
+    public virtual void InitializeTwitter(string writablePath) { }
+    public virtual int CheckTwitterAccount() => -1;
+    public virtual bool InputTwitterAccount() => false;
+    public virtual int SetTwitterAccount() => -1;
+    public virtual bool InputTwitterTweet() => false;
+    public virtual bool SendTwitterTweet(string? text) => false;
+
+    public virtual int Count(in ConstantValue value) => value.Array?.Count ?? 0;
+    public virtual bool ContainsString(string text, string value) => text.Contains(value, StringComparison.Ordinal);
     public virtual int GetHeight(in EntityQuery query) => NotImplemented<int>();
     public virtual int GetWidth(in EntityQuery query) => NotImplemented<int>();
     public virtual int GetMediaDuration(in EntityQuery query) => NotImplemented<int>();
     public virtual int GetTimeRemaining(in EntityQuery query) => NotImplemented<int>();
     public virtual int GetTimeElapsed(in EntityQuery query) => NotImplemented<int>();
 
-    public virtual ConstantValue FormatString(string format, object[] args) => NotImplemented<ConstantValue>();
+    public virtual ConstantValue FormatString(string format, object[] args)
+    {
+        string result = PrintfFormatter.Format(format, args, out bool invalid);
+        if (invalid) ReportInvalidArgument("String", "format", ConstantValue.String(format));
+        return ConstantValue.String(result);
+    }
+
+    /// <summary>Starts the entity context for a synchronous chapter or scene call.</summary>
+    public virtual void EnterCallScope() { }
+    /// <summary>Releases that context before execution resumes in its caller.</summary>
+    public virtual void LeaveCallScope() { }
 
     public virtual void CreateEntity(in EntityPath entityPath) { NotImplemented(); }
     public virtual void CreateThread(in EntityPath entityPath, string target, NsCoordinate x, NsCoordinate y) { NotImplemented(); }
@@ -51,6 +74,8 @@ public abstract class BuiltInFunctions
     public virtual void DestroyEntities(in EntityQuery query) { NotImplemented(); }
 
     public virtual void Wait(TimeSpan delay) { NotImplemented(); }
+    public virtual void SetVertex(in EntityQuery query, NsCoordinate x, NsCoordinate y) { NotImplemented(); }
+    public virtual void ReportInvalidArgument(string functionName, string argumentName, in ConstantValue value) { }
 
     /// <summary>
     /// Original name: WaitKey.
@@ -136,6 +161,7 @@ public abstract class BuiltInFunctions
     public virtual void CreateScrollbar(in EntityPath path, int priority, int x1, int y1, int x2, int y2, NsRational initialValue, NsScrollDirection scrollDirection, string knobImage) { NotImplemented(); }
     public virtual void SetScrollbar(in EntityQuery scrollbar, in EntityQuery parent) { NotImplemented(); }
     public virtual float GetScrollbarValue(in EntityQuery scrollbarEntity) => 0;
+    public virtual void SetScrollSpeed(in EntityQuery query, float speed) { NotImplemented(); }
 
     public virtual void Exit() { NotImplemented(); }
 
@@ -172,4 +198,8 @@ public abstract class BuiltInFunctions
     public virtual void Reset() { NotImplemented(); }
 
     public virtual void Draw() { NotImplemented(); }
+
+    public virtual void CreateFrameAnimation(in EntityPath path, int priority, NsCoordinate x, NsCoordinate y,
+        ReadOnlySpan<string> frames, int ticksPerFrame, string finalFrame, bool removeOnCompletion, bool loop, bool wait) { NotImplemented(); }
+    public virtual void WaitFrameAnimation(in EntityQuery query) { NotImplemented(); }
 }

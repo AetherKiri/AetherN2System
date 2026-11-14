@@ -8,12 +8,14 @@ internal sealed class TextBlock : RenderItem
 {
     private readonly TextLayout _layout;
     private readonly Vector4 _margin;
+    private readonly bool _verticalGlyphs;
 
     public TextBlock(EntityName name, Entity? parent, int priority, string markup,
         TextRenderContext ctx, DesignSizeU maxBounds, FontSettings fontSettings, Vector4 margin)
         : base(name, parent, priority)
     {
         _margin = margin;
+        _verticalGlyphs = fontSettings.VerticalGlyphs;
         _layout = new TextLayout(maxBounds.Width, maxBounds.Height,
             rubyFontSizeMultiplier: fontSettings.RubyFontSizeMultiplier);
         foreach (DialogueSegment segment in Dialogue.Parse(markup, fontSettings).Segments)
@@ -49,6 +51,7 @@ internal sealed class TextBlock : RenderItem
         render.Text.Render(render, render.MainBatch, _layout,
             render.GetTransformMatrix(Transform, GetSize(render), useScaling: true, aligned: false),
             new Vector2(_margin.X, _margin.Y),
-            new ScreenRectU(PointU<ScreenPixel>.Zero, render.RenderResolution), Color.A);
+            new ScreenRectU(PointU<ScreenPixel>.Zero, render.RenderResolution), Color.A,
+            verticalGlyphs: _verticalGlyphs);
     }
 }

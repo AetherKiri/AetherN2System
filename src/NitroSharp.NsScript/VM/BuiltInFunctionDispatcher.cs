@@ -2,20 +2,32 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
+using NitroSharp.NsScript.Compiler;
 using NitroSharp.NsScript.Primitives;
 
 namespace NitroSharp.NsScript.VM;
 
 internal sealed class BuiltInFunctionDispatcher
 {
-    private readonly ConstantValue[] _variables;
+    private ConstantValue[] _variables;
+    private ConstantValue[] _flags;
     private BuiltInFunctions _impl;
     private ConstantValue? _result;
 
-    public BuiltInFunctionDispatcher(ConstantValue[] variables)
+    public BuiltInFunctionDispatcher(ConstantValue[] variables, ConstantValue[] flags)
     {
         _variables = variables;
+        _flags = flags;
         _impl = null!;
+    }
+
+    private ref ConstantValue Reference(short slot)
+        => ref (slot >= 0 ? ref _variables[slot] : ref _flags[-slot - 2]);
+
+    internal void UpdateGlobals(ConstantValue[] variables, ConstantValue[] flags)
+    {
+        _variables = variables;
+        _flags = flags;
     }
 
     private void SetResult(in ConstantValue value)
@@ -33,6 +45,40 @@ internal sealed class BuiltInFunctionDispatcher
         var args = new ArgConsumer(arguments);
         switch (function)
         {
+            case BuiltInFunction.CreateFrameAnimation:
+                CreateFrameAnimation(ref args);
+                break;
+            case BuiltInFunction.WaitFrameAnimation:
+                _impl.WaitFrameAnimation(args.TakeEntityQuery());
+                break;
+            case BuiltInFunction.Twitter_Init:
+                _impl.InitializeTwitter(args.TakeString());
+                break;
+            case BuiltInFunction.Twitter_CheckAcount:
+                SetResult(ConstantValue.Number(_impl.CheckTwitterAccount()));
+                break;
+            case BuiltInFunction.Twitter_InputAcount:
+                SetResult(ConstantValue.Boolean(_impl.InputTwitterAccount()));
+                break;
+            case BuiltInFunction.Twitter_SetAcount:
+                SetResult(ConstantValue.Number(_impl.SetTwitterAccount()));
+                break;
+            case BuiltInFunction.Twitter_InputTweet:
+                SetResult(ConstantValue.Boolean(_impl.InputTwitterTweet()));
+                break;
+            case BuiltInFunction.Twitter_Tweet:
+                SetResult(ConstantValue.Boolean(_impl.SendTwitterTweet(args.Count > 0 ? args.TakeString() : null)));
+                break;
+            case BuiltInFunction.LegacyUnsupported:
+                _impl.LegacyUnsupported(args.TakeString(), args.TakeInt(), args.TakeString());
+                break;
+            case BuiltInFunction.SetVertex:
+                SetVertex(ref args);
+                break;
+            case BuiltInFunction.SetScrollSpeed:
+                _impl.SetScrollSpeed(args.TakeEntityQuery(), args.Take().AsNumber()
+                    ?? throw ThrowHelper.ArgumentInvalid("speed"));
+                break;
             case BuiltInFunction.Position:
                 Position(ref args);
                 break;
@@ -212,14 +258,14 @@ internal sealed class BuiltInFunctionDispatcher
             case BuiltInFunction.Count:
                 SetResult(ConstantValue.Number(_impl.Count(args.TakeOpt(ConstantValue.Null))));
                 break;
-            case BuiltInFunction.VariableValue:
-                SetResult(ConstantValue.Boolean(_impl.VariableValue(args.AsSpan(0))));
-                break;
             case BuiltInFunction.ModuleFileName:
                 ModuleFileName();
                 break;
             case BuiltInFunction.String:
                 String(ref args);
+                break;
+            case BuiltInFunction.Strstr:
+                SetResult(ConstantValue.Boolean(_impl.ContainsString(args.TakeString(), args.TakeString())));
                 break;
             case BuiltInFunction.Integer:
                 Integer(ref args);
@@ -409,13 +455,32 @@ internal sealed class BuiltInFunctionDispatcher
         );
     }
 
+    private void SetVertex(ref ArgConsumer args)
+    {
+        EntityQuery query = args.TakeEntityQuery();
+        NsCoordinate x = vertexAxis(args.Take(), "x");
+        NsCoordinate y = vertexAxis(args.Take(), "y");
+        _impl.SetVertex(query, x, y);
+
+        NsCoordinate vertexAxis(ConstantValue value, string name)
+        {
+            try { return NsCoordinate.FromValue(value); }
+            catch (ArgumentException)
+            {
+                // Some scripts contain misspelled pivot labels; preserve only that axis.
+                _impl.ReportInvalidArgument("SetVertex", name, value);
+                return NsCoordinate.Inherit();
+            }
+        }
+    }
+
     private void CursorPosition(ref ArgConsumer args)
     {
         short xSlot = args.TakeRef();
         short ySlot = args.TakeRef();
         Vector2 position = _impl.GetCursorPosition();
-        _variables[xSlot] = ConstantValue.Number((int)position.X);
-        _variables[ySlot] = ConstantValue.Number((int)position.Y);
+        Reference(xSlot) = ConstantValue.Number((int)position.X);
+        Reference(ySlot) = ConstantValue.Number((int)position.Y);
     }
 
     private void Position(ref ArgConsumer args)
@@ -424,8 +489,8 @@ internal sealed class BuiltInFunctionDispatcher
         short xSlot = args.TakeRef();
         short ySlot = args.TakeRef();
         Vector2 position = _impl.GetPosition(query);
-        _variables[xSlot] = ConstantValue.Number((int)position.X);
-        _variables[ySlot] = ConstantValue.Number((int)position.Y);
+        Reference(xSlot) = ConstantValue.Number((int)position.X);
+        Reference(ySlot) = ConstantValue.Number((int)position.Y);
     }
 
     private void SetScrollbar(ref ArgConsumer args)
@@ -559,6 +624,20 @@ internal sealed class BuiltInFunctionDispatcher
         );
     }
 
+    private void CreateFrameAnimation(ref ArgConsumer args)
+    {
+        EntityPath path = args.TakeEntityPath();
+        int priority = args.TakeInt();
+        NsCoordinate x = args.TakeCoordinate(), y = args.TakeCoordinate();
+        ConstantValue value = args.Take();
+        NsArray array = value.Array ?? throw ThrowHelper.ArgumentInvalid("frames");
+        var frames = new string[array.Count];
+        for (int i = 0; i < frames.Length; i++)
+            frames[i] = array.Get(ConstantValue.Number(i)).Scalar.ConvertToString();
+        _impl.CreateFrameAnimation(path, priority, x, y, frames, args.TakeInt(), args.TakeString(),
+            args.TakeBool(), args.TakeBool(), args.TakeBool());
+    }
+
     private void SetTone(ref ArgConsumer args)
     {
         EntityQuery query = args.TakeEntityQuery();
@@ -578,7 +657,11 @@ internal sealed class BuiltInFunctionDispatcher
             {
                 BuiltInConstant.Heavy => 16u,
                 BuiltInConstant.Medium => 8u,
-                _ => throw new Exception()
+                // Intermediate strengths retain the existing four-pass spacing.
+                BuiltInConstant.SemiHeavy => 12u,
+                BuiltInConstant.Light => 4u,
+                BuiltInConstant.Normal => 0u,
+                var shade => throw new NotSupportedException($"Unsupported shade strength {shade}.")
             }
         );
     }
@@ -953,12 +1036,12 @@ internal sealed class BuiltInFunctionDispatcher
         short minuteSlot = args.TakeRef();
         short secondSlot = args.TakeRef();
         DateTime now = _impl.GetDateTime();
-        _variables[yearSlot] = ConstantValue.Number(now.Year);
-        _variables[monthSlot] = ConstantValue.Number(now.Month);
-        _variables[daySlot] = ConstantValue.Number(now.Day);
-        _variables[hourSlot] = ConstantValue.Number(now.Hour);
-        _variables[minuteSlot] = ConstantValue.Number(now.Minute);
-        _variables[secondSlot] = ConstantValue.Number(now.Second);
+        Reference(yearSlot) = ConstantValue.Number(now.Year);
+        Reference(monthSlot) = ConstantValue.Number(now.Month);
+        Reference(daySlot) = ConstantValue.Number(now.Day);
+        Reference(hourSlot) = ConstantValue.Number(now.Hour);
+        Reference(minuteSlot) = ConstantValue.Number(now.Minute);
+        Reference(secondSlot) = ConstantValue.Number(now.Second);
     }
 
     private void String(ref ArgConsumer args)
@@ -967,7 +1050,7 @@ internal sealed class BuiltInFunctionDispatcher
         var list = new List<object>();
         foreach (ref readonly ConstantValue arg in args.AsSpan(1))
         {
-            int? num = (int?)arg.AsNumber();
+            float? num = arg.AsNumber();
             if (num is not null)
             {
                 list.Add(num.Value);
@@ -1261,7 +1344,7 @@ internal sealed class BuiltInFunctionDispatcher
             if (val.Type == BuiltInType.BuiltInConstant)
                 return EnumConversions.ToEntityAction(val.AsBuiltInConstant()!.Value);
             if (val.Type == BuiltInType.String &&
-                Enum.TryParse(val.AsString(), ignoreCase: true, out BuiltInConstant constant))
+                WellKnownSymbols.LookupBuiltInConstant(val.AsString()!) is { } constant)
                 return EnumConversions.ToEntityAction(constant);
             return UnexpectedType<NsEntityAction>(val.Type);
         }

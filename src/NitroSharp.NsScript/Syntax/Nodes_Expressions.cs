@@ -42,6 +42,20 @@ public sealed class NameExpression : Expression
     protected override SyntaxNode? GetChild(int index) => null;
 }
 
+public sealed class IndexExpression(Expression target, Expression index, TextSpan span) : Expression(span)
+{
+    public Expression Target { get; } = target;
+    public Expression Index { get; } = index;
+    public override SyntaxNodeKind Kind => SyntaxNodeKind.IndexExpression;
+    public override void Accept(SyntaxVisitor visitor) => visitor.VisitIndexExpression(this);
+    protected override SyntaxNode? GetChild(int index) => index switch
+    {
+        0 => Target,
+        1 => Index,
+        _ => null
+    };
+}
+
 public sealed class UnaryExpression : Expression
 {
     internal UnaryExpression(
