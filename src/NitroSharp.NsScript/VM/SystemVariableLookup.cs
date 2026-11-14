@@ -11,6 +11,9 @@ public sealed class SystemVariableLookup
     private int _presentText;
 
     private int _rButtonDown;
+    private int _lButtonDown;
+    private int _returnKeyDown;
+    private int _escapeKeyDown;
     private int _x360ButtonStartDown;
     private int _x360ButtonADown;
     private int _x360ButtonBDown;
@@ -37,6 +40,7 @@ public sealed class SystemVariableLookup
     private int _lastText;
     private int _skip;
     private int _textAuto;
+    private int _textErase;
     private int _textAutoLock;
     private int _menuLock;
     private int _skipLock;
@@ -66,6 +70,9 @@ public sealed class SystemVariableLookup
         _presentText = Lookup("SYSTEM_present_text");
         PresentProcess = Lookup("SYSTEM_present_process");
         _rButtonDown = Lookup("SYSTEM_r_button_down");
+        _lButtonDown = Lookup("SYSTEM_l_button_down");
+        _returnKeyDown = Lookup("SYSTEM_keydown_enter");
+        _escapeKeyDown = Lookup("SYSTEM_keydown_esc");
         _x360ButtonStartDown = Lookup("SYSTEM_XBOX360_button_start_down");
         _x360ButtonADown = Lookup("SYSTEM_XBOX360_button_a_down");
         _x360ButtonBDown = Lookup("SYSTEM_XBOX360_button_b_down");
@@ -89,6 +96,7 @@ public sealed class SystemVariableLookup
         _lastText = Lookup("SYSTEM_last_text");
         _skip = Lookup("SYSTEM_skip");
         _textAuto = Lookup("SYSTEM_text_auto");
+        _textErase = Lookup("SYSTEM_text_erase");
         _textAutoLock = Lookup("SYSTEM_text_auto_lock");
 
         _menuLock = Lookup("SYSTEM_menu_lock");
@@ -141,6 +149,10 @@ public sealed class SystemVariableLookup
     public ref ConstantValue CurrentDialogueBox => ref Var(_presentPreprocess);
     public ref ConstantValue CurrentDialogueBlock => ref Var(_presentText);
     public ref ConstantValue RightButtonDown => ref Var(_rButtonDown);
+    public ref ConstantValue LeftButtonDown => ref Var(_lButtonDown);
+    public ref ConstantValue ReturnKeyDown => ref Var(_returnKeyDown);
+    public ref ConstantValue EscapeKeyDown => ref Var(_escapeKeyDown);
+    public ref ConstantValue TextErase => ref Var(_textErase);
 
     public ref ConstantValue X360StartButtonDown => ref Var(_x360ButtonStartDown);
     public ref ConstantValue X360AButtonDown => ref Var(_x360ButtonADown);

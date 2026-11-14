@@ -2,6 +2,7 @@
 <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>NitroSharp.Tests</AssemblyName><RollForward>Major</RollForward></PropertyGroup>
 <ItemGroup>
   <Compile Remove="media_smoke/**/*.cs" />
+  <Compile Remove="video_smoke/**/*.cs" />
   <ProjectReference Include="../../src/NitroSharp.Rebuild/NitroSharp.Rebuild.csproj" />
 </ItemGroup>
 </Project>

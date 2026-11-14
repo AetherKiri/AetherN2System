@@ -56,12 +56,19 @@ internal sealed class DialoguePage : RenderItem
     {
         base.Update(ctx);
         ctx.RenderContext.Text.RequestGlyphs(_layout);
+        if (ctx.VM.SystemVariables.TextErase.AsBool() ?? false)
+        {
+            if (ctx.InputContext.Consume(InputAction.Advance))
+                ctx.VM.SystemVariables.TextErase = ConstantValue.False;
+            return;
+        }
         var settings = ctx.VM.SystemVariables.GetTextSettings();
         bool skip = (ctx.VM.SystemVariables.Skip.AsBool() ?? false)
             || ctx.InputContext.IsActionHeld(InputAction.Skip);
         if (IsRevealing)
         {
-            if (skip || _disableTextAnimation || ctx.InputContext.Consume(InputAction.Advance))
+            if (skip || _disableTextAnimation
+                || (settings.WaitKey?.AsBool() ?? true) && ctx.InputContext.Consume(InputAction.Advance))
             {
                 _textAnimation!.Complete();
                 // The press that reveals a sentence must not also pass its halt.
@@ -83,9 +90,9 @@ internal sealed class DialoguePage : RenderItem
             bool auto = ctx.VM.SystemVariables.TextAuto.AsBool() ?? false;
             float autoWait = MathF.Max(0, settings.AutoWaitPerCharacter?.AsNumber() ?? 100)
                 * Math.Max(1, _charactersSinceInput);
-            if (!skip && (settings.WaitKey?.AsBool() ?? true)
-                && !(auto && _waitElapsed >= autoWait)
-                && !ctx.InputContext.Consume(InputAction.Advance)) return;
+            if (!skip && !(auto && _waitElapsed >= autoWait)
+                && (!(settings.WaitKey?.AsBool() ?? true)
+                    || !ctx.InputContext.Consume(InputAction.Advance))) return;
             _waitingForInput = false;
             _waitElapsed = 0;
             _charactersSinceInput = 0;
@@ -170,6 +177,7 @@ internal sealed class DialoguePage : RenderItem
 
     public override void Render(GameContext ctx)
     {
+        if (ctx.VM.SystemVariables.TextErase.AsBool() ?? false) return;
         RenderContext render = ctx.RenderContext;
         render.Text.Render(render, render.MainBatch, _layout,
             render.GetTransformMatrix(Transform, GetSize(render), useScaling: true, aligned: false),

@@ -2,6 +2,9 @@
 using System.Collections.Generic;
 using NitroSharp.Common;
 using NitroSharp.NsScript;
+using NitroSharp.Input;
+using NitroSharp.NsScript.VM;
+using System.IO;
 
 namespace NitroSharp;
 
@@ -10,6 +13,8 @@ internal sealed class World : EntityScope
     private readonly List<Process> _processes = [];
     private readonly List<Entity> _newEntities = [];
     private readonly List<Entity> _deletedEntities = [];
+    private Process? _systemMenu;
+    private NsScriptThreadState? _pendingReset;
 
     public World(Process mainProcess, Thread mainThread)
     {
@@ -188,7 +193,70 @@ internal sealed class World : EntityScope
 
     public void Update(GameContext ctx)
     {
+        CurrentProcess.MainThread.InterruptVideoWait(ctx.InputContext);
+        if (_systemMenu is null && !(ctx.VM.SystemVariables.MenuLock.AsBool() ?? false)
+            && ctx.InputContext.Consume(InputAction.Back))
+        {
+            TryBeginSystemMenu(ctx.VM, ctx.Profile.SysScripts.Menu);
+        }
         CurrentProcess.Update(ctx);
+        if (!ApplyPendingReset()) FinishSystemMenu();
+    }
+
+    internal void RequestReset(NsScriptThreadState startup)
+    {
+        _pendingReset = startup;
+        // End the requesting script slice and stop other scene threads before
+        // the current process update list continues.
+        foreach (Process process in _processes)
+            foreach (Entity entity in process.GetDescendants())
+                if (entity is Thread thread) thread.Request(NsEntityAction.Stop);
+    }
+
+    internal bool ApplyPendingReset()
+    {
+        if (_pendingReset is not { } startup) return false;
+        _pendingReset = null;
+        var font = MainProcess.FontSettings;
+        EntityName processName = MainProcess.Name;
+        foreach (Process process in _processes.ToArray()) DestroyEntity(process);
+        _systemMenu = null;
+        MainProcess = CurrentProcess = AddEntity(new Process(processName, null, font));
+        var thread = AddEntity(new Thread(EntityName.Parse("main"), MainProcess, startup, isMain: true));
+        MainProcess.Enable();
+        thread.Enable();
+        return true;
+    }
+
+    internal bool TryBeginSystemMenu(NsScriptVM vm, string module)
+    {
+        if (_systemMenu is not null) return false;
+        try
+        {
+            return vm.CreateThread(module, "main") is { } state && BeginSystemMenu(state);
+        }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
+
+    internal bool BeginSystemMenu(NsScriptThreadState state)
+    {
+        if (_systemMenu is not null) return false;
+        _systemMenu = AddEntity(new Process(EntityName.Parse("system-menu"), null, MainProcess.FontSettings));
+        var thread = AddEntity(new Thread(EntityName.Parse("main"), _systemMenu, state, isMain: true));
+        _systemMenu.Enable();
+        thread.Enable();
+        CurrentProcess = _systemMenu;
+        return true;
+    }
+
+    internal bool FinishSystemMenu()
+    {
+        if (_systemMenu is not { } menu || !menu.MainThread.State.DoneExecuting) return false;
+        CurrentProcess = MainProcess;
+        _systemMenu = null;
+        DestroyEntity(menu);
+        return true;
     }
 
     public void Render(GameContext ctx)

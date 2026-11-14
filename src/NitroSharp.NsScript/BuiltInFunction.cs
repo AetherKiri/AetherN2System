@@ -135,5 +135,8 @@ public enum BuiltInFunction : byte
     Twitter_InputTweet,
     Twitter_Tweet,
     CreateFrameAnimation,
-    WaitFrameAnimation
+    WaitFrameAnimation,
+    DrawLegacyTransition,
+    FinishFrameAnimation,
+    SetTextOrientation
 }

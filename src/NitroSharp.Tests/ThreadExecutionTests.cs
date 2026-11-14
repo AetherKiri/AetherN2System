@@ -56,6 +56,18 @@ public sealed class ThreadExecutionTests
         Assert.Equal(new[] { "loop", "loop" }, script.Builtins.Choices);
     }
 
+    [Theory]
+    [InlineData("", false)]
+    [InlineData(", null", false)]
+    [InlineData(", false", false)]
+    [InlineData(", true", true)]
+    public void WaitPlayAcceptsExistingNullAndOptionalSkipArguments(string argument, bool expected)
+    {
+        using var script = new Script($"chapter main {{ WaitPlay(\"@mbgm*\"{argument}); }}");
+        script.Advance();
+        Assert.Equal(("@mbgm*", expected), script.Builtins.MediaWait);
+    }
+
     [Fact]
     public void SliceBudgetBoundsLoopsThatNeverYield()
     {
@@ -139,6 +151,8 @@ public sealed class ThreadExecutionTests
         public bool Pressed;
         public List<string> Choices { get; } = [];
         public Action? OnChoice;
+        public (string, bool) MediaWait;
+        public override void WaitPlay(in EntityQuery query, bool allowSkip = false) => MediaWait = (query.ToString(), allowSkip);
         public override bool SaveExists(uint slot) => false;
         public override bool HandleInputEvents(in EntityQuery uiElementPath) => Pressed && uiElementPath.ToString() == "@target";
         public override void CreateChoice(in EntityPath entityPath)

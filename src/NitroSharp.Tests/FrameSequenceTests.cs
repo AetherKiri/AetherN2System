@@ -17,6 +17,25 @@ namespace NitroSharp.Tests;
 
 public sealed class FrameSequenceTests
 {
+    [Fact]
+    public void RetainedSourceTracksSparseCellsAndExplicitOrRemovedStill()
+    {
+        using var sparse = Sequence();
+        sparse.Advance(33);
+        Assert.Equal("red", sparse.CurrentSource);
+        sparse.Advance(33);
+        Assert.Equal("blue", sparse.CurrentSource);
+        using var final = Sequence(final: "green", loop: true);
+        final.Request(NsEntityAction.Stop);
+        Assert.Equal("green", final.CurrentSource);
+        using var missingFinal = Sequence(final: "missing", loop: true);
+        missingFinal.Request(NsEntityAction.Stop);
+        Assert.Equal("red", missingFinal.CurrentSource);
+        using var removed = Sequence(remove: true);
+        removed.Request(NsEntityAction.Stop);
+        Assert.Equal("", removed.CurrentSource);
+    }
+
     private static SpriteTexture? Load(string path) => path switch
     {
         "red" => SpriteTexture.SolidColor(RgbaFloat.Red, new DesignSizeU(10, 10)),

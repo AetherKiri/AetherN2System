@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -24,6 +25,95 @@ public sealed class LegacyNpsInstallTests : IDisposable
         _sjis = Encoding.GetEncoding(932);
         _gbk = Encoding.GetEncoding(936);
         Directory.CreateDirectory(_root);
+    }
+
+    [Fact]
+    public void ColumnarPresentationRetainsVerticalBoxAndConfiguredTextBoundaries()
+    {
+        Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys.ini", _sjis.GetBytes("width=800\nheight=600\n"));
+        Write("textbox.ini", _sjis.GetBytes("[BOX2]\nColumnarWriting=TRUE\nBoxLeft=40\nBoxTop=50\nBoxWidth=720\nBoxHeight=500\nMarginLeft=20\nMarginTop=6\nMarginRight=10\nMarginBottom=6\nframename=data/box01.png\ntransparency=80\n"));
+        Write("data/box01.png", [1]);
+        Write("script/start.nps", _sjis.GetBytes("<BOX TYPE=2>Vertical<k>"));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Contains("SetTextOrientation(true)", source);
+        Assert.Contains("CreateWindow(\"legacy_box\", 10000, 760, 56, 488, 700, false)", source);
+        Assert.Contains("488, 690, 0, 26", source);
+        Assert.Contains("Rotate(\"legacy_box/page1\", 0, 0, 0, 90", source);
+        Assert.DoesNotContain("LegacyUnsupported", source);
+    }
+
+    [Fact]
+    public void TextChoicesDecodeTranslatedLabelsAndOriginalConfiguredBoxes()
+    {
+        Write("game_cn.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys_cn.ini", _sjis.GetBytes("width=800\nheight=600\n"));
+        Write("choice.ini", _sjis.GetBytes("[BOX0]\nBoxLeft=180\nBoxTop=200\nBoxWidth=440\nBoxHeight=55\nMarginTop=8\nframename=bar-01\nonFramename=bar-02\npushFramename=bar-03\ntransparency=50\n"));
+        foreach (string frame in new[] { "bar-01", "bar-02", "bar-03" }) Write("data/" + frame + ".png", [1]);
+        Write("script/start.nps", Combine(_sjis.GetBytes("<CHOICE HREF=#done TEXT='"), _gbk.GetBytes("继续前进"), _sjis.GetBytes("'></A><MARKER NAME=#done>")));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Contains("继续前进", source);
+        Assert.Contains("11000, 180, 200, 440, 55", source);
+        Assert.Contains("Center, 193, 440, 55", source);
+        Assert.Contains("data/bar-01.png", source);
+        Assert.Contains("data/bar-02.png", source);
+        Assert.Contains("data/bar-03.png", source);
+        Assert.DoesNotContain("LegacyUnsupported", source);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void MovieUsesConfiguredRootMixedFilenameAndLooseOrPackedResource(bool loose)
+    {
+        Write("game_cn.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys_cn.ini", _sjis.GetBytes("width=80\nheight=60\nmovie=videos\n"));
+        WritePak("movies.pak", new Dictionary<string, byte[]> { ["videos/角色ＯＰ.mpg"] = [1] });
+        Write("script/start.nps", Combine(_sjis.GetBytes("<MOVIE SRC='"), _gbk.GetBytes("角色ＯＰ"), _sjis.GetBytes("' SKIP=ON>")));
+        if (loose) Write("videos/角色ＯＰ.mpg", [2]);
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Contains("CreateMovie(\"legacy_movie\", 11000, Center, Middle, false, false, \"videos/角色ＯＰ.mpg\")", source);
+        Assert.Contains("WaitPlay(\"legacy_movie\", true)", source);
+        Assert.DoesNotContain("LegacyUnsupported", source);
+        var compilation = new Compilation(settings.ScriptRoot, Encoding.UTF8);
+        var emitted = compilation.Emit([compilation.GetSourceModule(settings.StartupScript)], settings.ScriptRoot, "globals");
+        Assert.Empty(emitted.Diagnostics);
+    }
+
+    [Fact]
+    public void MissingAuthoredVoiceContinuesWhileExistingVoiceKeepsItsResource()
+    {
+        Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys.ini", _sjis.GetBytes("width=80\nheight=60\n"));
+        Write("voice/chapter/001.ogg", [1]);
+        Write("script/start.nps", _sjis.GetBytes("<VOICE SRC=chapter/001><VOICE SRC=chapter/absent><BOX TYPE=9>Continued<k>"));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Equal(2, source.Split("Request(\"legacy_voice\", Stop)").Length - 1);
+        Assert.Equal(1, source.Split("CreateSound(").Length - 1);
+        Assert.Contains("voice/chapter/001.ogg", source);
+        Assert.Contains("Continued", source);
+        Assert.DoesNotContain("LegacyUnsupported", source);
+        Assert.Contains(settings.Diagnostics, value => value.Contains("missing authored VOICE 'chapter/absent'"));
+    }
+
+    [Theory]
+    [InlineData("../absent")]
+    [InlineData("chapter/../absent")]
+    [InlineData("C:/absent")]
+    public void MalformedVoicePathDoesNotBecomeSilentMissingVoice(string path)
+    {
+        Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys.ini", _sjis.GetBytes("width=80\nheight=60\n"));
+        Write("script/start.nps", _sjis.GetBytes("<VOICE SRC='" + path + "'>"));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Contains("LegacyUnsupported", source);
+        Assert.Contains("Unsafe legacy resource path", source);
+        Assert.DoesNotContain(settings.Diagnostics, value => value.Contains("continues silently"));
     }
 
     [Fact]
@@ -56,24 +146,63 @@ public sealed class LegacyNpsInstallTests : IDisposable
     }
 
     [Fact]
-    public void DirectionalMasksUseCacheAndHaveOppositeScreenGradients()
+    public void ExistingInvalidWipeDoesNotAcquireTheMissingMaskFallback()
     {
         Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
         Write("sys.ini", _sjis.GetBytes("width=80\nheight=60\n"));
-        Write("script/start.nps", _sjis.GetBytes("<WIPE EFFECT=RIGHT TIME=5><WIPE EFFECT=LEFT TIME=5><WIPE EFFECT=DOWN TIME=5><WIPE EFFECT=UP TIME=5>"));
+        Write("data/broken.png", [1, 2, 3]);
+        Write("script/start.nps", _sjis.GetBytes("<WIPE EFFECT=broken TIME=10>"));
         var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
-        foreach (string direction in new[] { "right", "left", "down", "up" })
-        {
-            string path = Path.Combine(settings.ScriptRoot, "masks", direction + ".png");
-            using var image = Image.Load<Rgba32>(path);
-            Assert.Equal((80, 60), (image.Width, image.Height));
-            Assert.Equal(direction is "right" or "down" ? (byte)0 : (byte)255, image[0, 0].R);
-            Assert.Equal(direction is "right" or "down" ? (byte)255 : (byte)0, image[79, 59].R);
-            Assert.False(File.Exists(Path.Combine(_root, "masks", direction + ".png")));
-        }
         string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
-        Assert.Contains("DrawTransition(", source);
+        Assert.Contains("LegacyUnsupported", source);
+        Assert.Contains("must be an indexed PNG", source);
+        Assert.DoesNotContain(settings.Diagnostics, value => value.Contains("missing authored WIPE"));
+    }
+
+    [Fact]
+    public void MissingGlassClearsOnlyItsNumberedLayerAndPreservesBackground()
+    {
+        Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys.ini", _sjis.GetBytes("width=80\nheight=60\n"));
+        Write("cg/room.png", [1]);
+        Write("script/start.nps", _sjis.GetBytes("<BACKGROUND SRC=room><GLASS SRC=sepia NUM=0><WIPE EFFECT=NORMAL>"));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Contains("cg/room.png", source);
+        Assert.Contains("_layer0_visible = false", source);
         Assert.DoesNotContain("LegacyUnsupported", source);
+        Assert.Contains(settings.Diagnostics, value => value.Contains("missing authored GLASS image 'sepia'"));
+    }
+
+    [Fact]
+    public void AuthoredWipesUseOriginalDataMasksAndMissingMasksWaitBeforeCommit()
+    {
+        Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys.ini", _sjis.GetBytes("width=80\nheight=60\n"));
+        string[] effects = ["right", "left", "down", "up", "center", "tlcenter", "light4", "light"];
+        foreach (string effect in effects) Write("data/" + effect + ".png", IndexedMask());
+        Write("script/start.nps", _sjis.GetBytes(string.Concat(effects.Select(effect => "<WIPE EFFECT=" + effect + " TIME=5>"))
+            + "<WIPE EFFECT=absent TIME=5>"));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Equal(effects.Length, source.Split("DrawLegacyTransition(").Length - 1);
+        string[] masks = Directory.GetFiles(Path.Combine(settings.ScriptRoot, "masks"), "authored-*.png");
+        Assert.Equal(effects.Length, masks.Length);
+        foreach (string mask in masks)
+        {
+            Assert.Contains(mask, source);
+            using var image = Image.Load<Rgba32>(mask);
+            Assert.Equal((3, 5), (image.Width, image.Height));
+            for (int y = 0; y < 5; y++)
+            {
+                Assert.Equal(new Rgba32(0, 0, 0, 255), image[0, y]);
+                Assert.Equal(new Rgba32(128, 128, 128, 255), image[1, y]);
+                Assert.Equal(new Rgba32(255, 255, 255, 255), image[2, y]);
+            }
+        }
+        Assert.DoesNotContain("LegacyUnsupported", source);
+        Assert.Contains("Wait((5 * 100) - (5 * 100) % 128)", source);
+        Assert.Contains(settings.Diagnostics, value => value.Contains("missing authored WIPE mask 'absent'"));
         var compilation = new Compilation(settings.ScriptRoot, Encoding.UTF8);
         var emitted = compilation.Emit([compilation.GetSourceModule(settings.StartupScript)], settings.ScriptRoot, "globals");
         Assert.Empty(emitted.Diagnostics);
@@ -97,7 +226,7 @@ public sealed class LegacyNpsInstallTests : IDisposable
         Assert.Contains("cg/衛士ａ_通常.png", source);
         Assert.Contains("_actor0_x = -125", source);
         Assert.DoesNotContain("LegacyUnsupported", source);
-        Assert.Contains(settings.Diagnostics, value => value.Contains("unsupported vertical writing"));
+        Assert.DoesNotContain(settings.Diagnostics, value => value.Contains("unsupported vertical writing"));
         var compilation = new Compilation(settings.ScriptRoot, Encoding.UTF8);
         var emitted = compilation.Emit([compilation.GetSourceModule(settings.StartupScript)], settings.ScriptRoot, "globals");
         Assert.Empty(emitted.Diagnostics);
@@ -145,6 +274,25 @@ public sealed class LegacyNpsInstallTests : IDisposable
         Assert.DoesNotContain("_actor1", source);
         Assert.Contains("_actor0_visible = false", source);
         Assert.DoesNotContain("LegacyUnsupported", source);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LocalizedActorIdentityCanBeConfirmedInAnotherModuleButConflictsRemainFailures(bool conflict)
+    {
+        Write("game_cn.ini", _sjis.GetBytes("Name=fixture\nBegin=ending.nps\n"));
+        Write("sys_cn.ini", _sjis.GetBytes("width=80\nheight=60\n"));
+        WritePak("original.pak", new Dictionary<string, byte[]> {
+            ["script/original.nps"] = _sjis.GetBytes("<VOICE NAME=葉 SRC=chapter/001><VOICE NAME=他 SRC=chapter/002>"),
+            ["voice/chapter/001.ogg"] = [1], ["voice/chapter/002.ogg"] = [1], ["cg/葉_戦闘.png"] = [1] });
+        Write("script/chapter.nps", Combine(_sjis.GetBytes("<VOICE NAME='"), _gbk.GetBytes("叶"), _sjis.GetBytes("' SRC=chapter/001>")));
+        if (conflict) Write("script/other.nps", Combine(_sjis.GetBytes("<VOICE NAME='"), _gbk.GetBytes("叶"), _sjis.GetBytes("' SRC=chapter/002>")));
+        Write("script/ending.nps", Combine(_sjis.GetBytes("<BUSTUP NAME='"), _gbk.GetBytes("叶"), _sjis.GetBytes("' FACE=戦闘 MODE=on><WIPE EFFECT=NORMAL>")));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Equal(conflict, source.Contains("LegacyUnsupported"));
+        Assert.Equal(!conflict, source.Contains("cg/葉_戦闘.png"));
     }
 
     [Theory]
@@ -257,6 +405,52 @@ public sealed class LegacyNpsInstallTests : IDisposable
     }
 
     private static byte[] Combine(params byte[][] pieces) => pieces.SelectMany(bytes => bytes).ToArray();
+
+    private static byte[] IndexedMask()
+    {
+        using var png = new MemoryStream();
+        png.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+        byte[] header = new byte[13];
+        BinaryPrimitives.WriteUInt32BigEndian(header, 3);
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(4), 5);
+        header[8] = 8; header[9] = 3;
+        Chunk("IHDR", header);
+        // Deliberately unrelated palette: the wipe uses indices, not colors.
+        byte[] palette = Enumerable.Repeat((byte)37, 256 * 3).ToArray();
+        Chunk("PLTE", palette);
+        using var pixels = new MemoryStream();
+        byte[] values = [0, 128, 255];
+        for (int filter = 0; filter < 5; filter++)
+        {
+            pixels.WriteByte((byte)filter);
+            for (int x = 0; x < 3; x++)
+            {
+                int left = x > 0 ? values[x - 1] : 0, above = filter > 0 ? values[x] : 0;
+                int predictor = filter switch { 0 => 0, 1 => left, 2 => above, 3 => (left + above) / 2, _ => above };
+                pixels.WriteByte(unchecked((byte)(values[x] - predictor)));
+            }
+        }
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionMode.Compress, leaveOpen: true)) zlib.Write(pixels.ToArray());
+        Chunk("IDAT", compressed.ToArray());
+        Chunk("IEND", []);
+        return png.ToArray();
+
+        void Chunk(string type, byte[] data)
+        {
+            byte[] encoded = Encoding.ASCII.GetBytes(type), length = new byte[4];
+            BinaryPrimitives.WriteUInt32BigEndian(length, (uint)data.Length);
+            png.Write(length); png.Write(encoded); png.Write(data);
+            uint crc = uint.MaxValue;
+            foreach (byte value in encoded.Concat(data))
+            {
+                crc ^= value;
+                for (int bit = 0; bit < 8; bit++) crc = (crc >> 1) ^ ((crc & 1) != 0 ? 0xEDB88320u : 0);
+            }
+            BinaryPrimitives.WriteUInt32BigEndian(length, ~crc);
+            png.Write(length);
+        }
+    }
 
     private void WritePak(string name, Dictionary<string, byte[]> files)
     {

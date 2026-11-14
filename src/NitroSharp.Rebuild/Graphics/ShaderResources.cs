@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using NitroSharp.Graphics.Core;
 using Veldrid;
 
@@ -369,14 +370,39 @@ internal sealed class VideoShaderResources : IDisposable
         _alphaBlend.Dispose();
         InputLayout.Dispose();
         _additiveBlend.Dispose();
+        _multiplicativeBlend.Dispose();
+        ParamLayout.Dispose();
         EnableAlphaBuffer.Dispose();
     }
 }
 
-internal readonly record struct TransitionParameters(Vector4 Amounts, Vector4 Viewport);
+[InlineArray(256)]
+internal struct TransitionCoverage
+{
+    private float _first;
+}
+
+internal struct TransitionParameters
+{
+    public Vector4 Amounts;
+    public Vector4 Viewport;
+    public TransitionCoverage Coverage;
+
+    public TransitionParameters(Vector4 amounts, Vector4 viewport)
+    {
+        Amounts = amounts;
+        Viewport = viewport;
+        Coverage = default;
+        if (amounts.W > 0)
+            for (int i = 0; i < 256; i++)
+                Coverage[i] = LegacyTransitionCoverage.Calculate(amounts.X, i, amounts.W >= 2);
+    }
+}
 
 internal sealed class TransitionShaderResources : IDisposable
 {
+    private readonly Pipeline _additivePipeline;
+    private readonly Pipeline _multiplicativePipeline;
     public TransitionShaderResources(
         GraphicsDevice graphicsDevice,
         ShaderLibrary shaderLibrary,
@@ -429,6 +455,40 @@ internal sealed class TransitionShaderResources : IDisposable
             outputDescription
         );
         Pipeline = factory.CreateGraphicsPipeline(in pipelineDesc);
+        pipelineDesc.BlendState = new BlendStateDescription
+        {
+            AttachmentStates =
+            [
+                new BlendAttachmentDescription
+                {
+                    BlendEnabled = true,
+                    SourceColorFactor = BlendFactor.One,
+                    DestinationColorFactor = BlendFactor.One,
+                    ColorFunction = BlendFunction.Add,
+                    SourceAlphaFactor = BlendFactor.SourceAlpha,
+                    DestinationAlphaFactor = BlendFactor.DestinationAlpha,
+                    AlphaFunction = BlendFunction.Add
+                }
+            ]
+        };
+        _additivePipeline = factory.CreateGraphicsPipeline(in pipelineDesc);
+        pipelineDesc.BlendState = new BlendStateDescription
+        {
+            AttachmentStates =
+            [
+                new BlendAttachmentDescription
+                {
+                    BlendEnabled = true,
+                    SourceColorFactor = BlendFactor.DestinationColor,
+                    DestinationColorFactor = BlendFactor.InverseSourceAlpha,
+                    ColorFunction = BlendFunction.Add,
+                    SourceAlphaFactor = BlendFactor.Zero,
+                    DestinationAlphaFactor = BlendFactor.One,
+                    AlphaFunction = BlendFunction.Add
+                }
+            ]
+        };
+        _multiplicativePipeline = factory.CreateGraphicsPipeline(in pipelineDesc);
         ProgressBuffer = new GpuBuffer<TransitionParameters>(
             graphicsDevice,
             BufferUsage.UniformBuffer,
@@ -439,12 +499,21 @@ internal sealed class TransitionShaderResources : IDisposable
     public ResourceLayout InputLayout { get; }
     public ResourceLayout ParamLayout { get; }
     public Pipeline Pipeline { get; }
+    public Pipeline GetPipeline(BlendMode mode) => mode switch
+    {
+        BlendMode.Alpha => Pipeline,
+        BlendMode.Additive => _additivePipeline,
+        BlendMode.Multiplicative => _multiplicativePipeline,
+        _ => throw new NotSupportedException($"Mask transition does not support {mode} blending.")
+    };
 
     public GpuBuffer<TransitionParameters> ProgressBuffer { get; }
 
     public void Dispose()
     {
         Pipeline.Dispose();
+        _additivePipeline.Dispose();
+        _multiplicativePipeline.Dispose();
         InputLayout.Dispose();
         ParamLayout.Dispose();
         ProgressBuffer.Dispose();

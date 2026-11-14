@@ -230,60 +230,65 @@ namespace NitroSharp.NsScript.Syntax.Markup
 
         private MarkupTag ParseTag()
         {
-            while (PeekChar() == '<' || PeekChar() == '/')
-            {
-                EatChar(PeekChar());
-            }
-
+            while (PeekChar() == '<' || PeekChar() == '/') AdvanceChar();
             StartScanning();
             char c;
-            while (!SyntaxFacts.IsWhitespace(c = PeekChar())
-                && !SyntaxFacts.IsNewLine(c) && c != '>')
+            while (!SyntaxFacts.IsWhitespace(c = PeekChar()) && !SyntaxFacts.IsNewLine(c) && c != '>')
             {
+                if (c == EofCharacter) throw new FormatException("Unterminated markup tag.");
                 AdvanceChar();
             }
-
             TextSpan span = CurrentLexemeSpan;
             string name = Text.Substring(span.Start, span.Length);
             var attributes = new AttributeListBuilder();
             while ((c = PeekChar()) != '>')
             {
-                if (c == ' ' || SyntaxFacts.IsNewLine(c))
-                {
-                    AdvanceChar();
-                }
-                else
-                {
-                    attributes.Add(ParseXmlAttribute());
-                }
+                if (c == EofCharacter) throw new FormatException("Unterminated markup tag.");
+                if (SyntaxFacts.IsWhitespace(c) || SyntaxFacts.IsNewLine(c)) AdvanceChar();
+                else attributes.Add(ParseXmlAttribute());
             }
-
             EatChar('>');
             return new MarkupTag(name, attributes.Build());
         }
 
         private (string key, string value) ParseXmlAttribute()
         {
-            char c;
             StartScanning();
             while (PeekChar() != '=')
             {
+                if (PeekChar() is EofCharacter or '>')
+                    throw new FormatException("Markup attribute is missing '='.");
                 AdvanceChar();
             }
             TextSpan span = CurrentLexemeSpan;
-            string key = Text.Substring(span.Start, span.Length);
-
+            string key = Text.Substring(span.Start, span.Length).Trim();
+            if (key.Length == 0) throw new FormatException("Markup attribute name is empty.");
             EatChar('=');
-            TryEatChar('"');
-
-            StartScanning();
-            while ((c = PeekChar()) != '"' && c != '>' && c != ' ')
+            while (SyntaxFacts.IsWhitespace(PeekChar()) || SyntaxFacts.IsNewLine(PeekChar())) AdvanceChar();
+            char quote = PeekChar() is '"' or '\'' ? PeekChar() : '\0';
+            bool doubled = false;
+            if (quote != '\0')
             {
+                AdvanceChar();
+                // Some shipped translation scripts wrap ruby readings in two
+                // quotes on each side: TEXT=""reading"".
+                doubled = key.Equals("TEXT", StringComparison.OrdinalIgnoreCase)
+                    && PeekChar() == quote && PeekChar(1) is not ('>' or EofCharacter)
+                    && !SyntaxFacts.IsWhitespace(PeekChar(1)) && !SyntaxFacts.IsNewLine(PeekChar(1));
+                if (doubled) AdvanceChar();
+            }
+            StartScanning();
+            while (true)
+            {
+                char c = PeekChar();
+                if (c == EofCharacter) throw new FormatException("Unterminated markup attribute value.");
+                if (quote == '\0' ? c == '>' || SyntaxFacts.IsWhitespace(c) || SyntaxFacts.IsNewLine(c)
+                    : c == quote && (!doubled || PeekChar(1) == quote)) break;
                 AdvanceChar();
             }
             span = CurrentLexemeSpan;
             string value = Text.Substring(span.Start, span.Length);
-            TryEatChar('"');
+            if (quote != '\0') AdvanceChar(doubled ? 2 : 1);
             return (key, value);
         }
 

@@ -101,7 +101,7 @@ internal sealed class MixedScriptDecoder(byte[] bytes, Encoding structure, Sourc
                     if (_position < bytes.Length && bytes[_position] is (byte)'"' or (byte)'\'')
                     {
                         Append(start, _position, structure);
-                        CopyQuoted(options.DialogueEncoding);
+                        CopyQuoted(options.DialogueEncoding, allowDoubledDelimiter: true);
                         start = _position;
                         continue;
                     }
@@ -168,18 +168,23 @@ internal sealed class MixedScriptDecoder(byte[] bytes, Encoding structure, Sourc
         return false;
     }
 
-    private void CopyQuoted(Encoding encoding)
+    private void CopyQuoted(Encoding encoding, bool allowDoubledDelimiter = false)
     {
         byte quote = bytes[_position++];
         _output.Append((char)quote);
+        bool doubled = allowDoubledDelimiter && _position + 1 < bytes.Length
+            && bytes[_position] == quote && bytes[_position + 1] != '>' && !IsSpace(bytes[_position + 1]);
+        if (doubled) { _position++; _output.Append((char)quote); }
         int start = _position;
-        while (_position < bytes.Length && bytes[_position] != quote)
+        while (_position < bytes.Length && (bytes[_position] != quote
+            || doubled && (_position + 1 >= bytes.Length || bytes[_position + 1] != quote)))
             _position += CharacterLength(_position, encoding);
         Append(start, _position, encoding);
         if (_position < bytes.Length)
         {
             _position++;
             _output.Append((char)quote);
+            if (doubled && _position < bytes.Length) { _position++; _output.Append((char)quote); }
         }
     }
 

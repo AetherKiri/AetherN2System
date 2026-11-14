@@ -72,6 +72,8 @@ internal readonly struct YCbCrBufferReader(YCbCrBufferInternal buffer)
 {
     public bool PeekFrame(out YCbCrFrame frame) => buffer.PeekFrame(out frame);
 
+    public void ReleaseFrame() => buffer.TakeFrame();
+
     public (Texture luma, Texture chroma) GetDeviceTextures()
     {
         YCbCrTextures textures = buffer.GetTextures();

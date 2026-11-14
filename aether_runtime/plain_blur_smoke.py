@@ -78,6 +78,14 @@ with tempfile.TemporaryDirectory(prefix='aether-mask-transition-') as cache:
             assert sample(200, 60)[:3] == (0, 0, 0)
             advance()
             assert [sample(x, 60)[0] for x in (40, 41, 42, 43)] == crop
-            print(f'{width}x{height}: passive snapshot and cropped sprite GPU blur, NORMAL restoration passed')
+            advance()
+            strongest = [sample(x, 60)[0] for x in (40, 41, 42, 43)]
+            assert max(strongest) - min(strongest) < 12, strongest
+            assert all(70 < value < 180 for value in strongest), strongest
+            advance()
+            assert [sample(x, 60)[0] for x in (40, 41, 42, 43)] == strongest, 'NORMAL must retain the active shade'
+            advance()
+            assert [sample(x, 60)[0] for x in (40, 41, 42, 43)] == crop
+            print(f'{width}x{height}: passive/cropped GPU blur, NOMORE32, NORMAL retention and null restoration passed')
         finally:
             lib.aether_n2system_destroy(handle)

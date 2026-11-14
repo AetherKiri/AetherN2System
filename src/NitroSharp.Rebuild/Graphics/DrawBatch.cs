@@ -238,15 +238,28 @@ internal sealed class DrawBatch(RenderContext context) : IDisposable
         );
     }
 
+    public void PushVideo(in QuadPrimitive quad, Texture luma, Texture chroma, bool alpha,
+        BlendMode blendMode, FilterMode filterMode, ScreenRectU? scissor)
+    {
+        VideoShaderResources resources = context.ShaderResources.Video;
+        UpdateBuffer(resources.EnableAlphaBuffer, new Vector4(alpha ? 1 : 0, 0, 0, 0));
+        ViewProjection projection = Target.OrthoProjection;
+        PushQuad(quad, resources.GetPipeline(blendMode), new ResourceBindings(
+            new ResourceSetKey(projection.ResourceLayout, projection.Buffer.VdBuffer),
+            new ResourceSetKey(resources.InputLayout, luma, chroma, context.GetSampler(filterMode)),
+            new ResourceSetKey(resources.ParamLayout, resources.EnableAlphaBuffer.VdBuffer)), scissor);
+    }
+
     public void PushTransitionQuad(in QuadPrimitive quad, Texture texture, Texture mask,
-        float progress, float feather, FilterMode filterMode, ScreenRectU? scissor)
+        float progress, float feather, FilterMode filterMode, ScreenRectU? scissor, int legacyMode = 0,
+        BlendMode blendMode = BlendMode.Alpha)
     {
         TransitionShaderResources resources = context.ShaderResources.Transition;
-        var parameters = new TransitionParameters(new Vector4(progress, feather, context.RenderScale, 0),
+        var parameters = new TransitionParameters(new Vector4(progress, feather, context.RenderScale, legacyMode),
             new Vector4(context.ViewportLeft, context.ViewportTop, 0, 0));
         UpdateBuffer(resources.ProgressBuffer, parameters);
         ViewProjection projection = Target.OrthoProjection;
-        PushQuad(quad, resources.Pipeline, new ResourceBindings(
+        PushQuad(quad, resources.GetPipeline(blendMode), new ResourceBindings(
             new ResourceSetKey(projection.ResourceLayout, projection.Buffer.VdBuffer),
             new ResourceSetKey(resources.InputLayout, texture, mask, context.GetSampler(filterMode)),
             new ResourceSetKey(resources.ParamLayout, resources.ProgressBuffer.VdBuffer)), scissor);

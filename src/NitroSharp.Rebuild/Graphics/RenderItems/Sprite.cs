@@ -155,6 +155,11 @@ internal readonly struct SpriteTexture : IDisposable
         DesignRectU? sourceRectangle = null, Vector2? uvOrigin = null, Vector2? uvExtent = null)
         => FromTexture(SpriteTextureKind.Owned, texture, size, sourceRectangle, uvOrigin, uvExtent);
 
+    internal static SpriteTexture FromOwnedTarget(RenderTarget target, DesignSizeU size,
+        Vector2 uvOrigin, Vector2 uvExtent)
+        => new(SpriteTextureKind.Owned, null, null, null, new TextureLease(target.ColorTarget, target),
+            RgbaFloat.White, size, uvOrigin, uvExtent);
+
     public static SpriteTexture FromBorrowedTexture(Texture texture)
         => FromTexture(SpriteTextureKind.Borrowed, texture);
 

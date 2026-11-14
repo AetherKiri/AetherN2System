@@ -18,6 +18,9 @@ public readonly record struct EntityAlias
 
     public static EntityAlias? TryParse(string alias)
     {
+        // Scripts may pass the same @alias spelling used by entity queries.
+        // Store only the name; this does not change the owning process scope.
+        if (alias.StartsWith('@')) alias = alias[1..];
         if (alias.Length == 0) { return null; }
 
         foreach (char c in alias)

@@ -5,11 +5,12 @@ using NitroSharp.NsScript;
 
 namespace NitroSharp;
 
-internal sealed class ChoiceEntity(EntityName name, Entity? parent) : Entity(name, parent)
+internal sealed class ChoiceEntity(EntityName name, Entity? parent, bool preserveOpacity = false) : Entity(name, parent)
 {
     private readonly Dictionary<NsFocusDirection, ChoiceEntity> _nextFocus = [];
 
     public bool IsClickable { get; private set; } = true;
+    public bool PreserveOpacity { get; } = preserveOpacity;
     public bool PointerInside { get; set; }
     public bool IsAttached => Parent is { } parent && ReferenceEquals(parent.TryGetChild(Name), this);
 
@@ -62,7 +63,7 @@ internal sealed class ChoiceEntity(EntityName name, Entity? parent) : Entity(nam
             };
         }
 
-        if (state is MouseState.Over or MouseState.Down)
+        if (!PreserveOpacity && (state is MouseState.Over or MouseState.Down))
             SetGroupOpacity(state == MouseState.Over ? "MouseOver" : "MouseClick", 1);
     }
 

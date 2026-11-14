@@ -1,4 +1,6 @@
+using System;
 using System.Runtime.InteropServices;
+using System.Globalization;
 using MessagePack;
 
 namespace NitroSharp.NsScript.Primitives;
@@ -90,6 +92,15 @@ public readonly record struct NsCoordinate
 
     public static NsCoordinate FromValue(ConstantValue val)
     {
+        if (val.AsString() is { } text)
+        {
+            bool relative = text.StartsWith('@');
+            ReadOnlySpan<char> number = relative ? text.AsSpan(1) : text.AsSpan();
+            if (number.Length > 0 && float.TryParse(number, NumberStyles.Float, CultureInfo.InvariantCulture,
+                out float parsed) && float.IsFinite(parsed))
+                return new NsCoordinate(parsed, relative);
+            throw ThrowHelper.ArgumentInvalid(nameof(val));
+        }
         return val.Type switch
         {
             BuiltInType.Numeric => new NsCoordinate(val.AsNumber()!.Value, isRelative: false),

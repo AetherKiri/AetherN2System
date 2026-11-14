@@ -1,7 +1,9 @@
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -47,8 +49,11 @@ internal static class LegacyNpsInstall
         private readonly List<string> _diagnostics = [];
         private readonly Dictionary<string, string> _bustupNames = new(StringComparer.Ordinal);
         private Dictionary<string, string?>? _originalVoiceActors;
+        private bool _translatedVoiceAliasesLoaded;
         private readonly Dictionary<string, string?> _voiceAliases = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _resolvedVoiceActors = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _wipeMasks = new(StringComparer.OrdinalIgnoreCase);
+        private string _cache = "";
         private const string AttributePattern = "([A-Za-z_][A-Za-z_0-9]*)[ \\t]*=[ \\t]*(?:\"([^\"]*)\"|'([^']*)'|([^ \\t\\r\\n>]+))";
         private bool _chinese;
 
@@ -104,6 +109,7 @@ internal static class LegacyNpsInstall
             string startupModule = Register(startup);
             string cache = Path.Combine(writable, "legacy-nps-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(cache);
+            _cache = cache;
             presentation = presentation with { TransitionMasks = WriteTransitionMasks(cache, width, height) };
             long totalSource = 0;
             while (_pending.TryDequeue(out Resource? resource))
@@ -156,8 +162,100 @@ internal static class LegacyNpsInstall
         }
 
         private string ResolveAsset(string kind, string path)
-            => FindAsset(kind, Expand(path))?.Name
-                ?? throw new FormatException("NPS resource is missing: " + kind + "/" + path);
+        {
+            // A missing authored voice is silent in the original player. Keep
+            // malformed paths distinct so they cannot acquire that fallback.
+            if (kind is "voice" or "wipe" or "glass") Normalize(path);
+            Resource? resource = FindAsset(kind == "wipe" ? "data" : kind == "glass" ? "cg" : kind, Expand(path));
+            if (resource is null)
+            {
+                if (kind is "voice" or "wipe" or "glass") return "";
+                throw new FormatException("NPS resource is missing: " + kind + "/" + path);
+            }
+            if (kind != "wipe") return resource.Name;
+            if (_wipeMasks.TryGetValue(resource.Name, out string? cached)) return cached;
+            // The original PNG reader retains palette indices. Their displayed
+            // palette colors are irrelevant to the wipe's threshold bytes.
+            using Image<Rgba32> mask = ReadIndexedWipeMask(Read(resource));
+            cached = Path.Combine(_cache, "masks", "authored-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(resource.Name)))[..24] + ".png");
+            mask.SaveAsPng(cached);
+            _wipeMasks.Add(resource.Name, cached);
+            return cached;
+        }
+
+        private static Image<Rgba32> ReadIndexedWipeMask(byte[] png)
+        {
+            if (!png.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
+                throw new FormatException("WIPE mask must be an indexed PNG.");
+            int width = 0, height = 0, depth = 0;
+            using var compressed = new MemoryStream();
+            for (int cursor = 8; cursor <= png.Length - 12;)
+            {
+                uint length = BinaryPrimitives.ReadUInt32BigEndian(png.AsSpan(cursor));
+                if (length > png.Length - cursor - 12) throw new FormatException("Truncated WIPE PNG chunk.");
+                ReadOnlySpan<byte> type = png.AsSpan(cursor + 4, 4), data = png.AsSpan(cursor + 8, (int)length);
+                if (type.SequenceEqual("IHDR"u8))
+                {
+                    if (data.Length != 13 || width != 0) throw new FormatException("Invalid WIPE PNG header.");
+                    uint w = BinaryPrimitives.ReadUInt32BigEndian(data), h = BinaryPrimitives.ReadUInt32BigEndian(data[4..]);
+                    depth = data[8];
+                    if (w is 0 or > 16384 || h is 0 or > 16384 || (long)w * h > 32L * 1024 * 1024
+                        || depth is not (1 or 2 or 4 or 8) || data[9] != 3 || data[10] != 0 || data[11] != 0 || data[12] != 0)
+                        throw new FormatException("WIPE mask requires a bounded, non-interlaced indexed PNG.");
+                    width = (int)w; height = (int)h;
+                }
+                else if (type.SequenceEqual("IDAT"u8)) compressed.Write(data);
+                cursor += (int)length + 12;
+                if (type.SequenceEqual("IEND"u8)) break;
+            }
+            if (width == 0 || compressed.Length == 0) throw new FormatException("WIPE PNG has no pixel data.");
+            compressed.Position = 0;
+            using var zlib = new ZLibStream(compressed, CompressionMode.Decompress);
+            int stride = (width * depth + 7) / 8;
+            byte[] previous = new byte[stride], row = new byte[stride];
+            var image = new Image<Rgba32>(width, height);
+            try
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    int filter = zlib.ReadByte();
+                    if (filter is < 0 or > 4) throw new FormatException("Invalid WIPE PNG row filter.");
+                    zlib.ReadExactly(row);
+                    for (int i = 0; i < stride; i++)
+                    {
+                        int left = i > 0 ? row[i - 1] : 0, above = previous[i], upperLeft = i > 0 ? previous[i - 1] : 0;
+                        int prediction = filter switch
+                        {
+                            0 => 0, 1 => left, 2 => above, 3 => (left + above) / 2,
+                            _ => Paeth(left, above, upperLeft)
+                        };
+                        row[i] = unchecked((byte)(row[i] + prediction));
+                    }
+                    for (int x = 0; x < width; x++)
+                    {
+                        int bit = x * depth;
+                        byte value = (byte)((row[bit / 8] >> (8 - depth - bit % 8)) & ((1 << depth) - 1));
+                        image[x, y] = new(value, value, value, 255);
+                    }
+                    (row, previous) = (previous, row);
+                }
+                if (zlib.ReadByte() != -1) throw new FormatException("WIPE PNG has excess pixel data.");
+                return image;
+            }
+            catch (Exception error) when (error is InvalidDataException or EndOfStreamException)
+            {
+                image.Dispose();
+                throw new FormatException("Invalid compressed WIPE PNG pixels.", error);
+            }
+            catch { image.Dispose(); throw; }
+
+            static int Paeth(int left, int above, int upperLeft)
+            {
+                int prediction = left + above - upperLeft;
+                int a = Math.Abs(prediction - left), b = Math.Abs(prediction - above), c = Math.Abs(prediction - upperLeft);
+                return a <= b && a <= c ? left : b <= c ? above : upperLeft;
+            }
+        }
 
         private Resource? FindScript(IEnumerable<string> candidates)
             => Find(candidates.SelectMany(path => new[] { path, _paths.GetValueOrDefault("script", "script") + "/" + path })
@@ -308,8 +406,15 @@ internal static class LegacyNpsInstall
                 byte[] bytes = Encoding.Latin1.GetBytes(rawValue);
                 string value = _sjis.GetString(bytes);
                 if (command == "VOICE" && key == "NAME") value = (chineseText ? _gbk : _sjis).GetString(bytes);
+                else if (command == "CHOICE" && key == "TEXT") value = (chineseText ? _gbk : _sjis).GetString(bytes);
                 else if (command == "BUSTUP" && key == "NAME") value = actorName ?? value;
                 else if (command == "BUSTUP" && key == "FACE") value = actorFace ?? value;
+                else if (command == "WIPE" && key == "EFFECT")
+                {
+                    if (value.ToUpperInvariant() is not ("NORMAL" or "FADE" or "WHITEOUT" or "BLACKOUT" or "BLIND"
+                        or "SPIRAL" or "RASTER" or "OVER" or "UNDER" or "NOIZE" or "SLASH" or "SLASH2" or "TINY" or "TRANSFORM" or "DELAYFADE"))
+                        value = FindAsset("data", Candidates(bytes))?.Name ?? value;
+                }
                 else if (key == "HREF" && !value.StartsWith('#')) value = FindScript(Candidates(bytes))?.Name ?? value;
                 else if (key == "FILE" && command == "CHOICE")
                     value = string.Join(';', rawValue.Split(';').Select(item =>
@@ -328,7 +433,8 @@ internal static class LegacyNpsInstall
                 }
                 else if (key is "SRC" or "ONSE" or "PUSHSE" || key == "SE" && command is ("ANIM" or "BGANIM"))
                 {
-                    string kind = command == "VOICE" ? "voice" : command is "BGM" or "SE" || key is "ONSE" or "PUSHSE" or "SE" ? "sound" : "cg";
+                    string kind = command == "VOICE" ? "voice" : command == "MOVIE" ? "movie"
+                        : command is "BGM" or "SE" || key is "ONSE" or "PUSHSE" or "SE" ? "sound" : "cg";
                     if (value.Length > 0 && !value.StartsWith('#')) value = FindAsset(kind, Candidates(bytes))?.Name ?? value;
                 }
                 char delimiter = value.Contains('"') ? '\'' : '"';
@@ -358,7 +464,6 @@ internal static class LegacyNpsInstall
 
         private void ReadVoiceAliases(byte[] bytes, bool chineseText)
         {
-            _voiceAliases.Clear();
             _resolvedVoiceActors.Clear();
             if (!chineseText) return;
             if (_originalVoiceActors is null)
@@ -381,13 +486,31 @@ internal static class LegacyNpsInstall
                     }
                 }
             }
-            foreach (var (source, name) in VoiceActors(bytes))
+            if (_translatedVoiceAliasesLoaded) { AddAliases(bytes); return; }
+            _translatedVoiceAliasesLoaded = true;
+            long translatedTotal = 0;
+            foreach (Resource script in _loose.Values.Where(resource => Path.GetExtension(resource.Name).Equals(".nps", StringComparison.OrdinalIgnoreCase)))
             {
-                if (FindAsset("voice", Candidates(Encoding.Latin1.GetBytes(source))) is not { } voice
-                    || !_originalVoiceActors.TryGetValue(voice.Name, out string? actor)) continue;
-                // Conflicting original speakers or translated names stay unresolved;
-                // no ordering, spelling distance, or language conversion is inferred.
-                if (!_voiceAliases.TryAdd(name, actor) && _voiceAliases[name] != actor) _voiceAliases[name] = null;
+                byte[] translated = Read(script);
+                translatedTotal = checked(translatedTotal + translated.Length);
+                if (translatedTotal > 128L * 1024 * 1024) throw new InvalidDataException("Translated NPS scripts exceed 128 MiB.");
+                AddAliases(translated);
+            }
+            // A translated script can also live in a patch archive.
+            AddAliases(bytes);
+
+            void AddAliases(byte[] translated)
+            {
+                foreach (var (source, name) in VoiceActors(translated))
+                {
+                    try { _strictGbk.GetString(Encoding.Latin1.GetBytes(name)); }
+                    catch (DecoderFallbackException) { continue; }
+                    if (FindAsset("voice", Candidates(Encoding.Latin1.GetBytes(source))) is not { } voice
+                        || !_originalVoiceActors.TryGetValue(voice.Name, out string? actor)) continue;
+                    // Conflicting original speakers or translated names stay unresolved;
+                    // no ordering, spelling distance, or language conversion is inferred.
+                    if (!_voiceAliases.TryAdd(name, actor) && _voiceAliases[name] != actor) _voiceAliases[name] = null;
+                }
             }
         }
 
@@ -409,12 +532,6 @@ internal static class LegacyNpsInstall
                     if (!name.StartsWith("BOX", StringComparison.OrdinalIgnoreCase) || !int.TryParse(name[3..], out int type)) continue;
                     int Number(string key, int fallback = 0) => values.TryGetValue(key, out byte[]? bytes)
                         && int.TryParse(_sjis.GetString(bytes), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) ? value : fallback;
-                    if (Number("ColumnarWriting") != 0)
-                    {
-                        boxes.Remove(type);
-                        _diagnostics.Add(textIni.Name + ": " + name + " uses unsupported vertical writing.");
-                        continue;
-                    }
                     int boxWidth = Number("BoxWidth"), boxHeight = Number("BoxHeight");
                     int left = Number("MarginLeft"), top = Number("MarginTop"), right = Number("MarginRight"), bottom = Number("MarginBottom");
                     if (boxWidth <= left + right || boxHeight <= top + bottom || boxWidth > 16384 || boxHeight > 16384
@@ -436,9 +553,24 @@ internal static class LegacyNpsInstall
                         }
                     }
                     boxes[type] = new(Number("BoxLeft"), Number("BoxTop"), boxWidth, boxHeight,
-                        left, top, right, bottom, frame, Math.Clamp(Number("transparency", 100), 0, 100));
+                        left, top, right, bottom, frame, Math.Clamp(Number("transparency", 100), 0, 100),
+                        values.TryGetValue("ColumnarWriting", out byte[]? columnar) && columnar.Length > 0 && _sjis.GetString(columnar) != "0");
                 }
-            return new(boxes, aligns);
+            var choices = new Dictionary<int, LegacyNpsChoiceBox>();
+            if (Find(["choice.ini", _paths["data"] + "/choice.ini"]) is { } choiceIni)
+                foreach (var (name, values) in ReadIniSections(choiceIni))
+                {
+                    if (!name.StartsWith("BOX", StringComparison.OrdinalIgnoreCase) || !int.TryParse(name[3..], out int slot) || slot is < 0 or > 9) continue;
+                    int Number(string key, int fallback = 0) => values.TryGetValue(key, out byte[]? bytes)
+                        && int.TryParse(_sjis.GetString(bytes), NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) ? value : fallback;
+                    string? Image(string key) => values.TryGetValue(key, out byte[]? bytes) && bytes.Length > 0
+                        ? FindAsset("cg", Candidates(bytes))?.Name ?? throw new FormatException("CHOICE frame resource is missing: " + _sjis.GetString(bytes)) : null;
+                    int w = Number("BoxWidth"), h = Number("BoxHeight");
+                    if (w is <= 0 or > 16384 || h is <= 0 or > 16384) continue;
+                    choices[slot] = new(Number("BoxLeft"), Number("BoxTop"), w, h, Number("MarginTop"),
+                        Number("frameleft"), Number("frametop"), Image("framename"), Image("onFramename"), Image("pushFramename"), Math.Clamp(Number("transparency", 50), 0, 100));
+                }
+            return new(boxes, aligns, ChoiceBoxes: choices);
         }
 
         private static IReadOnlyDictionary<string, string> WriteTransitionMasks(string cache, int width, int height)
@@ -446,10 +578,9 @@ internal static class LegacyNpsInstall
             var masks = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string directory = Path.Combine(cache, "masks");
             Directory.CreateDirectory(directory);
-            // Direction names describe the reveal boundary's motion: RIGHT
-            // reveals from left to right, DOWN from top to bottom. These masks
-            // share design coordinates across all actors and background layers.
-            foreach (string effect in new[] { "RIGHT", "LEFT", "DOWN", "UP", "BLIND" })
+            // BLIND is procedural in the original. Other effect names are authored
+            // image masks under the data root and must resolve from the install.
+            foreach (string effect in new[] { "BLIND" })
             {
                 using var image = new Image<Rgba32>(width, height);
                 image.ProcessPixelRows(accessor =>
@@ -462,10 +593,7 @@ internal static class LegacyNpsInstall
                             // Original system.dll 0x1000ADD0 copies rows where
                             // y%7 <= progress/7. Its 0..255 progress therefore
                             // fully reveals by 42 but still waits the full TIME.
-                            float progress = effect == "BLIND" ? 7 * (y % 7) / 255f
-                                : effect is "RIGHT" or "LEFT" ? x / (float)Math.Max(1, width - 1) : y / (float)Math.Max(1, height - 1);
-                            if (effect is "LEFT" or "UP") progress = 1 - progress;
-                            byte value = (byte)MathF.Round(progress * 255);
+                            byte value = (byte)(7 * (y % 7));
                             row[x] = new Rgba32(value, value, value, 255);
                         }
                     }

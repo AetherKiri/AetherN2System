@@ -128,7 +128,7 @@ public abstract class BuiltInFunctions
     public virtual void MoveCube(in EntityQuery query, TimeSpan duration, NsNumeric dstX, NsNumeric dstY, NsNumeric dstZ, NsEaseFunction easeFunction, TimeSpan delay) { NotImplemented(); }
 
     public virtual void PlayVideo(in EntityPath entityPath, int priority, NsCoordinate x, NsCoordinate y, bool loop, bool alpha, string source) { NotImplemented(); }
-    public virtual void WaitPlay(in EntityQuery query) { NotImplemented(); }
+    public virtual void WaitPlay(in EntityQuery query, bool allowSkip = false) { NotImplemented(); }
 
     /// <summary>
     /// Original name: CreateSound.
@@ -155,6 +155,7 @@ public abstract class BuiltInFunctions
     public virtual void WaitMove(in EntityQuery query) { NotImplemented(); }
 
     public virtual void CreateChoice(in EntityPath entityPath) { NotImplemented(); }
+    public virtual void CreateChoice(in EntityPath entityPath, bool preserveOpacity = false) => CreateChoice(entityPath);
     public virtual void SetNextFocus(in EntityQuery first, in EntityQuery second, NsFocusDirection focusDirection) { NotImplemented(); }
     public virtual void SelectEnd() { NotImplemented(); }
 
@@ -202,4 +203,8 @@ public abstract class BuiltInFunctions
     public virtual void CreateFrameAnimation(in EntityPath path, int priority, NsCoordinate x, NsCoordinate y,
         ReadOnlySpan<string> frames, int ticksPerFrame, string finalFrame, bool removeOnCompletion, bool loop, bool wait) { NotImplemented(); }
     public virtual void WaitFrameAnimation(in EntityQuery query) { NotImplemented(); }
+    public virtual string? FinishFrameAnimation(in EntityQuery query) => null;
+    public virtual void SetTextOrientation(bool vertical) { NotImplemented(); }
+    public virtual void BeginLegacyTransition(in EntityQuery query, TimeSpan duration,
+        string maskFileName, bool masked, TimeSpan waitTimeout, bool dynamic = false) { NotImplemented(); }
 }

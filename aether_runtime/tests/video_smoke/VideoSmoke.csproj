@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><AssemblyName>NitroSharp.Tests</AssemblyName><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable><RollForward>Major</RollForward></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/NitroSharp.Rebuild/NitroSharp.Rebuild.csproj" />
+    <Compile Include="../../Host.cs" Link="Host.cs" />
+    <Compile Include="../../NativeDependencies.cs" Link="NativeDependencies.cs" />
+    <Compile Include="../../LegacyNpsInstall.cs" Link="LegacyNpsInstall.cs" />
+  </ItemGroup>
+</Project>

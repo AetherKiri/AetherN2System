@@ -75,6 +75,16 @@ internal sealed class InputContext(GameWindow window) : IDisposable
         return advance || rightClick || Snapshot.KeyState(Key.LeftShift) || Snapshot.KeyState(Key.RightShift);
     }
 
+    internal bool ConsumeMovieInterrupt()
+    {
+        bool pressed = Snapshot.IsMouseDown(MouseButton.Left) || Snapshot.IsMouseDown(MouseButton.Right)
+            || Snapshot.IsKeyDown(Key.Return) || Snapshot.IsKeyDown(Key.KeypadEnter) || Snapshot.IsKeyDown(Key.Space);
+        Consume(InputAction.Advance);
+        Consume(InputAction.Enter);
+        Consume(InputAction.Back);
+        return pressed;
+    }
+
     public void Update(GameWindow window, SystemVariableLookup systemVariables)
     {
         Snapshot = window.PumpEvents();
@@ -91,6 +101,9 @@ internal sealed class InputContext(GameWindow window) : IDisposable
 
         SystemVariableLookup sys = systemVariables;
         set(out sys.RightButtonDown, IsActionDown(InputAction.Back));
+        set(out sys.LeftButtonDown, Snapshot.IsMouseDown(MouseButton.Left));
+        set(out sys.ReturnKeyDown, Snapshot.IsKeyDown(Key.Return) || Snapshot.IsKeyDown(Key.KeypadEnter));
+        set(out sys.EscapeKeyDown, Snapshot.IsKeyDown(Key.Escape));
         set(out sys.X360StartButtonDown, IsActionDown(InputAction.Advance));
         set(out sys.X360AButtonDown, IsActionDown(InputAction.Advance));
         set(out sys.X360BButtonDown, IsActionDown(InputAction.Back));

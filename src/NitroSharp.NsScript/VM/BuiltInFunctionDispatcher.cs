@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
@@ -45,11 +45,24 @@ internal sealed class BuiltInFunctionDispatcher
         var args = new ArgConsumer(arguments);
         switch (function)
         {
+            case BuiltInFunction.DrawLegacyTransition:
+                EntityQuery legacyQuery = args.TakeEntityQuery();
+                TimeSpan legacyDuration = args.TakeTimeSpan();
+                _impl.BeginLegacyTransition(legacyQuery, legacyDuration, args.TakeString(), args.TakeBool(),
+                    args.TakeAnimWaitTimeout(legacyDuration), args.Count > 5 && args.TakeBool());
+                break;
             case BuiltInFunction.CreateFrameAnimation:
                 CreateFrameAnimation(ref args);
                 break;
             case BuiltInFunction.WaitFrameAnimation:
                 _impl.WaitFrameAnimation(args.TakeEntityQuery());
+                break;
+            case BuiltInFunction.FinishFrameAnimation:
+                SetResult(_impl.FinishFrameAnimation(args.TakeEntityQuery()) is { } frame
+                    ? ConstantValue.String(frame) : ConstantValue.Null);
+                break;
+            case BuiltInFunction.SetTextOrientation:
+                _impl.SetTextOrientation(args.TakeBool());
                 break;
             case BuiltInFunction.Twitter_Init:
                 _impl.InitializeTwitter(args.TakeString());
@@ -408,7 +421,9 @@ internal sealed class BuiltInFunctionDispatcher
 
     private void WaitPlay(ref ArgConsumer args)
     {
-        _impl.WaitPlay(args.TakeEntityQuery());
+        EntityQuery query = args.TakeEntityQuery();
+        ConstantValue skip = args.TakeOpt(ConstantValue.False);
+        _impl.WaitPlay(query, skip.AsBool() ?? false);
     }
 
     private void Load(ref ArgConsumer args)
@@ -578,9 +593,16 @@ internal sealed class BuiltInFunctionDispatcher
     private void WaitAction(ref ArgConsumer args)
     {
         EntityQuery query = args.TakeEntityQuery();
-        TimeSpan ts = args.TakeTimeSpan();
+        // Shipped character-selection helpers use this exact null typo.
+        TimeSpan ts = args.NextIsString("nulll") ? ConsumeNullTypo(ref args) : args.TakeTimeSpan();
         TimeSpan? tsOpt = ts > TimeSpan.Zero ? ts : null;
         _impl.WaitAction(query, tsOpt);
+
+        static TimeSpan ConsumeNullTypo(ref ArgConsumer arguments)
+        {
+            arguments.Take();
+            return TimeSpan.Zero;
+        }
     }
 
     private void CreateName(ref ArgConsumer args)
@@ -651,17 +673,33 @@ internal sealed class BuiltInFunctionDispatcher
 
     private void SetShade(ref ArgConsumer args)
     {
+        EntityQuery query = args.TakeEntityQuery();
+        ConstantValue value = args.Take();
+        // The original engine restores the unshaded image for explicit NULL.
+        if (value.IsNull)
+        {
+            _impl.BoxBlur(query, 0);
+            return;
+        }
+        // NOMORE is the strongest native blur setting, despite its name.
+        if (value.AsString()?.Equals("NOMORE", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            _impl.BoxBlur(query, 32);
+            return;
+        }
+        BuiltInConstant shade = value.AsBuiltInConstant()
+            ?? throw new NotSupportedException($"Unsupported shade strength {value.ConvertToString()}.");
+        // NORMAL is accepted by the scripts but the native operation leaves the current shade unchanged.
+        if (shade == BuiltInConstant.Normal) return;
         _impl.BoxBlur(
-            args.TakeEntityQuery(),
-            nbPasses: args.TakeConstant() switch
+            query,
+            nbPasses: shade switch
             {
                 BuiltInConstant.Heavy => 16u,
-                BuiltInConstant.Medium => 8u,
-                // Intermediate strengths retain the existing four-pass spacing.
-                BuiltInConstant.SemiHeavy => 12u,
-                BuiltInConstant.Light => 4u,
-                BuiltInConstant.Normal => 0u,
-                var shade => throw new NotSupportedException($"Unsupported shade strength {shade}.")
+                BuiltInConstant.Medium => 4u,
+                BuiltInConstant.SemiHeavy => 8u,
+                BuiltInConstant.Light => 2u,
+                var unsupported => throw new NotSupportedException($"Unsupported shade strength {unsupported}.")
             }
         );
     }
@@ -933,7 +971,7 @@ internal sealed class BuiltInFunctionDispatcher
 
     private void CreateChoice(ref ArgConsumer args)
     {
-        _impl.CreateChoice(args.TakeEntityPath());
+        _impl.CreateChoice(args.TakeEntityPath(), args.TakeBool());
     }
 
     private void SetNextFocus(ref ArgConsumer args)
@@ -1266,6 +1304,9 @@ internal sealed class BuiltInFunctionDispatcher
                 _ => UnexpectedType<int>(arg.Type)
             };
         }
+
+        public bool NextIsString(string text)
+            => _pos < _args.Length && _args[_pos].AsString() == text;
 
         public TimeSpan TakeTimeSpan()
         {

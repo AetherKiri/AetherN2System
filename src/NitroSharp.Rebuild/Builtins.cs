@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using NitroSharp.Common;
 using NitroSharp.Content;
@@ -74,6 +75,16 @@ internal sealed class Builtins : BuiltInFunctions
     public override void LeaveCallScope() => CurrentThread.LeaveCallScope();
 
     public override void Exit() => _ctx.ShutdownSignal.Cancel();
+
+    public override void Reset()
+    {
+        NsScriptThreadState startup = VM.CreateThread(_ctx.Profile.SysScripts.Startup, "main")
+            ?? throw new InvalidOperationException("The startup script has no main entry point.");
+        _choiceInputs.Clear();
+        _focusedScrollbar = null;
+        _draggedScrollbar = null;
+        _world.RequestReset(startup);
+    }
 
     public override int GetPlatformId() => 100;
 
@@ -162,6 +173,36 @@ internal sealed class Builtins : BuiltInFunctions
     public override void WaitFrameAnimation(in EntityQuery query)
         => CurrentThread.WaitForFrameSequence(query);
 
+    public override string? FinishFrameAnimation(in EntityQuery query)
+    {
+        foreach (Entity entity in Query(query))
+            if (entity is FrameSequence sequence)
+            {
+                sequence.Request(NsEntityAction.Stop);
+                return sequence.CurrentSource;
+            }
+        return null;
+    }
+
+    public override void PlayVideo(in EntityPath path, int priority, NsCoordinate x, NsCoordinate y,
+        bool loop, bool alpha, string source)
+    {
+        if (!ResolveEntityPath(path, out EntityName name, out Entity? parent)) return;
+        Stream input = _ctx.Content.TryOpenStream(source)
+            ?? throw new FileNotFoundException("Movie file could not be opened.", source);
+        var video = new Video(name, parent, priority, input, _ctx.RenderContext.GraphicsDevice,
+            _ctx.AudioContext, loop, alpha);
+        try { video.WithPosition(_ctx.RenderContext, x, y); video.Start(); }
+        catch { video.Dispose(); throw; }
+        _world.AddEntity(video);
+    }
+
+    public override void WaitPlay(in EntityQuery query, bool allowSkip = false) => CurrentThread.WaitForMedia(query, allowSkip);
+
+    public override void WaitAction(in EntityQuery query, TimeSpan? timeout)
+        => CurrentThread.WaitForEntityActions(query,
+            timeout is { } duration ? Clock.Elapsed + AdjustDuration(duration) : null);
+
     public override void CreateSpriteEx(in EntityPath entityPath, int priority, NsCoordinate x, NsCoordinate y, uint srcX, uint srcY, uint width, uint height, string source)
     {
         if (ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
@@ -223,6 +264,19 @@ internal sealed class Builtins : BuiltInFunctions
             DefaultOutlineColor = outlineOffset != NsOutlineOffset.Unspecified
                 ? outlineColor.ToRgbaFloat().ToVector4() : null
         };
+    }
+
+    public override void SetTextOrientation(bool vertical)
+        => _world.CurrentProcess.FontSettings = _world.CurrentProcess.FontSettings with { VerticalGlyphs = vertical };
+
+    public override int GetMediaDuration(in EntityQuery query)
+    {
+        foreach (Entity entity in Query(query))
+        {
+            TimeSpan? duration = entity switch { AudioEntity audio => audio.Duration, Video video => video.Duration, _ => null };
+            if (duration is { } value) return (int)Math.Clamp(value.TotalMilliseconds, 0, int.MaxValue);
+        }
+        return 0;
     }
 
     public override void CreateDialogueBox(in EntityPath entityPath, int priority,
@@ -316,11 +370,14 @@ internal sealed class Builtins : BuiltInFunctions
     }
 
     public override void CreateChoice(in EntityPath entityPath)
+        => CreateChoice(entityPath, preserveOpacity: false);
+
+    public override void CreateChoice(in EntityPath entityPath, bool preserveOpacity = false)
     {
         if (!ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
             return;
 
-        var choice = _world.AddEntity(new ChoiceEntity(name, parent));
+        var choice = _world.AddEntity(new ChoiceEntity(name, parent, preserveOpacity));
         foreach (string mouseState in s_mouseStates)
             _world.AddEntity(new MouseStateEntity(EntityName.Parse(mouseState), choice));
     }
@@ -665,13 +722,51 @@ internal sealed class Builtins : BuiltInFunctions
 
     public override void BoxBlur(in EntityQuery query, uint nbPasses)
     {
-        if (nbPasses > 16) throw new ArgumentOutOfRangeException(nameof(nbPasses));
+        if (nbPasses > 32) throw new ArgumentOutOfRangeException(nameof(nbPasses));
         foreach (Entity entity in Query(query))
             foreach (Entity node in entity.DescendantsAndSelf())
                 if (node is PlainEffect plain) plain.SetBlur(nbPasses);
                 else if (node is Sprite sprite) sprite.SetBlur(nbPasses);
                 else if (node is RenderItem)
                     throw new NotSupportedException($"SetShade does not support {node.GetType().Name}.");
+    }
+
+    private int _legacyTransitionId;
+
+    public override void BeginLegacyTransition(in EntityQuery query, TimeSpan duration,
+        string maskFileName, bool masked, TimeSpan waitTimeout, bool dynamic = false)
+    {
+        duration = LegacyTransitionCoverage.QuantizeDuration(duration);
+        if (duration <= TimeSpan.Zero) return;
+        if (dynamic && masked) throw new ArgumentException("Dynamic legacy transitions require a uniform fade.");
+        var sources = new HashSet<RenderItem>();
+        foreach (Entity entity in Query(query))
+            foreach (Entity node in entity.DescendantsAndSelf())
+                if (node is RenderItem { IsHidden: false, IsPendingDestruction: false } visual)
+                {
+                    if (visual is LegacySceneTransition)
+                        throw new InvalidOperationException("A scene already being transitioned cannot be captured again.");
+                    sources.Add(visual);
+                }
+        if (sources.Count == 0) return;
+        var ordered = sources.ToArray();
+        Array.Sort(ordered);
+        AssetRef<Texture>? mask = masked
+            ? _ctx.Content.RequestTexture(maskFileName)
+                ?? throw new FileNotFoundException("Legacy transition mask was not found.", maskFileName)
+            : null;
+        string name = "__legacy_transition_" + ++_legacyTransitionId;
+        var transition = new LegacySceneTransition(EntityName.Parse(name), CurrentThread.EntityContext,
+            checked(ordered[^1].Priority + 1), ordered, mask, AdjustDuration(duration), dynamic);
+        _world.AddEntity(transition);
+        // Wait for the captured scene's animation, including asynchronous asset
+        // preparation, rather than expiring while its first frame is still loading.
+        if (waitTimeout != TimeSpan.Zero)
+            CurrentThread.Wait(new Thread.WaitOperation(Thread.WaitCondition.TransitionCompleted,
+                EntityQuery.Parse(name), null));
+        else if (dynamic)
+            CurrentThread.Wait(new Thread.WaitOperation(Thread.WaitCondition.LegacyTransitionReady, null, null)
+                { ActionTargets = [transition] });
     }
 
     public override void BeginTransition(in EntityQuery query, TimeSpan duration, NsRational srcFadeAmount,
@@ -686,7 +781,8 @@ internal sealed class Builtins : BuiltInFunctions
             foreach (Entity node in entity.DescendantsAndSelf())
                 if (node is RenderItem visual)
                 {
-                    if (visual is not (Sprite or SolidColorRect or PlainEffect or FrameSequence) || visual.BlendMode != BlendMode.Alpha)
+                    if (visual is not (Sprite or SolidColorRect or PlainEffect or FrameSequence)
+                        || visual.BlendMode is not (BlendMode.Alpha or BlendMode.Additive or BlendMode.Multiplicative))
                         throw new NotSupportedException($"Mask transition does not support {visual.GetType().Name} with {visual.BlendMode} blending.");
                     targets.Add(visual);
                 }

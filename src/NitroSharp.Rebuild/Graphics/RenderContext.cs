@@ -132,7 +132,7 @@ namespace NitroSharp.Graphics
             );
 
             Text = new TextRenderContext(GraphicsDevice, GlyphRasterizer, _textureCache);
-            MainBatch = new DrawBatch(this);
+            _mainBatch = new DrawBatch(this);
             _offscreenBatch = new DrawBatch(this);
 
             Icons = LoadIcons(gameProfile);
@@ -184,7 +184,9 @@ namespace NitroSharp.Graphics
 
         public TextRenderContext Text { get; }
 
-        public DrawBatch MainBatch { get; }
+        private readonly DrawBatch _mainBatch;
+        private DrawBatch? _captureBatch;
+        public DrawBatch MainBatch => _captureBatch ?? _mainBatch;
 
         public RenderTarget OffscreenTarget { get; }
         public ResourcePool<Texture> OffscreenTexturePool { get; }
@@ -391,6 +393,67 @@ namespace NitroSharp.Graphics
             {
                 snapshot.Dispose();
                 throw;
+            }
+        }
+
+        internal SpriteTexture CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items)
+        {
+            var target = CreateSceneTarget();
+            try
+            {
+                CaptureScene(context, items, target);
+                // Retain the entire target until the scene transition releases
+                // its snapshot; its capture is submitted before the main scene.
+                return SceneTexture(target);
+            }
+            catch
+            {
+                GraphicsDevice.DisposeWhenIdle(target);
+                throw;
+            }
+        }
+
+        internal RenderTarget CreateSceneTarget()
+            => new(GraphicsDevice, RenderResolution, _swapchainTarget.ColorTarget.Format);
+
+        internal SpriteTexture SceneTexture(RenderTarget target)
+        {
+            var origin = new Vector2(ViewportLeft / RenderResolution.Width, ViewportTop / RenderResolution.Height);
+            var extent = new Vector2((ViewportRight - ViewportLeft) / RenderResolution.Width,
+                (ViewportBottom - ViewportTop) / RenderResolution.Height);
+            return SpriteTexture.FromOwnedTarget(target, DesignResolution, origin, extent);
+        }
+
+        internal void CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items, RenderTarget target)
+        {
+            if (_captureBatch is not null) throw new InvalidOperationException("Nested scene capture is unsupported.");
+            try
+            {
+                _captureBatch = BeginOffscreenBatch(target);
+                _captureBatch.Clear(RgbaFloat.Black);
+                foreach (RenderItem item in items)
+                    if (!item.IsPendingDestruction) item.Render(context);
+                _captureBatch.End();
+            }
+            finally { _captureBatch = null; }
+        }
+
+        internal void CompositeScene(SpriteTexture previous, SpriteTexture incoming, RenderTarget target, float coverage)
+        {
+            DrawBatch batch = BeginOffscreenBatch(target);
+            batch.Clear(RgbaFloat.Black);
+            Draw(previous, 1);
+            Draw(incoming, coverage);
+            batch.End();
+
+            void Draw(SpriteTexture texture, float alpha)
+            {
+                (Vector2 topLeft, Vector2 bottomRight) = texture.GetTexCoords(this);
+                var size = DesignResolution.ToFloatSize();
+                var quad = QuadPrimitive.Create(size, GetTransformMatrix(Transform.Default, size, true, false),
+                    topLeft, bottomRight, new Vector4(1, 1, 1, alpha));
+                batch.PushQuad(quad, texture.Resolve(this), WhiteTexture, Vector2.Zero,
+                    BlendMode.Alpha, FilterMode.Point, null);
             }
         }
 

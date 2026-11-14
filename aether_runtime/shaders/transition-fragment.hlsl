@@ -1,7 +1,8 @@
 cbuffer TransitionParameters : register(b1)
 {
-    float4 _17_Amounts : packoffset(c0);
-    float4 _17_Viewport : packoffset(c1);
+    float4 _20_Amounts : packoffset(c0);
+    float4 _20_Viewport : packoffset(c1);
+    float4 _20_Coverage[64] : packoffset(c2);
 };
 
 Texture2D<float4> Mask : register(t1);
@@ -34,28 +35,42 @@ uint2 spvTextureSize(Texture2D<float4> Tex, uint Level, out uint Param)
 
 void frag_main()
 {
-    uint _38_dummy_parameter;
-    float2 maskUV = ((gl_FragCoord.xy - _17_Viewport.xy) / _17_Amounts.z.xx) / float2(int2(spvTextureSize(Mask, uint(0), _38_dummy_parameter)));
+    uint _40_dummy_parameter;
+    float2 maskUV = ((gl_FragCoord.xy - _20_Viewport.xy) / _20_Amounts.z.xx) / float2(int2(spvTextureSize(Mask, uint(0), _40_dummy_parameter)));
     float mask = Mask.Sample(Sampler, maskUV).x;
-    float feather = _17_Amounts.y;
+    float feather = _20_Amounts.y;
     float threshold = (mask * (1.0f - feather)) + (feather * 0.5f);
-    float _73;
+    float _75;
     if (feather > 0.0f)
     {
-        _73 = clamp(((_17_Amounts.x - threshold) / feather) + 0.5f, 0.0f, 1.0f);
+        _75 = clamp(((_20_Amounts.x - threshold) / feather) + 0.5f, 0.0f, 1.0f);
     }
     else
     {
-        _73 = step(threshold, _17_Amounts.x);
+        _75 = step(threshold, _20_Amounts.x);
     }
-    float coverage = _73;
-    if (_17_Amounts.x <= 0.0f)
+    float coverage = _75;
+    if (_20_Amounts.x <= 0.0f)
     {
         coverage = 0.0f;
     }
-    if (_17_Amounts.x >= 1.0f)
+    if (_20_Amounts.x >= 1.0f)
     {
         coverage = 1.0f;
+    }
+    if (_20_Amounts.w > 0.0f)
+    {
+        int _114;
+        if (_20_Amounts.w >= 2.0f)
+        {
+            _114 = int(round(clamp(mask, 0.0f, 1.0f) * 255.0f));
+        }
+        else
+        {
+            _114 = 0;
+        }
+        int index = _114;
+        coverage = _20_Coverage[index / 4][index % 4];
     }
     float4 texel = Texture.Sample(Sampler, fs_TexCoord);
     float alpha = (texel.w * fs_Color.w) * coverage;

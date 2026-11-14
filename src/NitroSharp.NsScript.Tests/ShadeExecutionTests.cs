@@ -26,6 +26,9 @@ public sealed class ShadeExecutionTests
                     SetShade("snapshot", MEDIUM);
                     SetShade("snapshot", LIGHT);
                     SetShade("snapshot", NORMAL);
+                    SetShade("snapshot", NOMORE);
+                    SetShade("snapshot", MEDIUM);
+                    SetShade("snapshot", null);
                 }
                 """, Encoding.UTF8);
             var compilation = new Compilation(root, Encoding.UTF8);
@@ -37,7 +40,7 @@ public sealed class ShadeExecutionTests
             var builtins = new TestBuiltins();
             for (int i = 0; i < 100 && !thread.DoneExecuting; i++) vm.Tick(ref thread, builtins);
             Assert.True(thread.DoneExecuting);
-            Assert.Equal(new uint[] { 16, 12, 8, 4, 0 }, builtins.Passes);
+            Assert.Equal(new uint[] { 16, 8, 4, 2, 32, 4, 0 }, builtins.Passes);
         }
         finally { Directory.Delete(root, recursive: true); }
     }

@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Collections.Generic;
 using NitroSharp.Input;
 using NitroSharp.Graphics;
+using NitroSharp.Media;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.VM;
 
@@ -16,6 +17,7 @@ internal sealed class Thread : Entity, IVmThread
     private readonly Stack<CallScopeEntity> _callScopes = new();
     private int _nextCallScope;
     internal const int ScriptSlicesPerFrame = 256;
+    private static readonly AnimationKind[] s_actionAnimations = Enum.GetValues<AnimationKind>();
 
     public Thread(EntityName name, Entity? parent, NsScriptThreadState vmState, bool isMain)
         : base(name, parent)
@@ -54,6 +56,10 @@ internal sealed class Thread : Entity, IVmThread
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(sliceBudget);
         if (_waitOperation is { Condition: WaitCondition.FrameSequenceCompleted } frameWait
             && FrameSequencesCompleted(frameWait)) _waitOperation = null;
+        if (_waitOperation is { Condition: WaitCondition.MediaCompleted } videoWait
+            && MediaCompleted(videoWait)) _waitOperation = null;
+        if (_waitOperation is { Condition: WaitCondition.EntityActionCompleted } actionWait
+            && EntityActionsCompleted(actionWait)) _waitOperation = null;
         int slices = 0;
         // Calls and builtin dispatch return Ok; finish polling before this input frame expires.
         while (slices < sliceBudget && IsEnabled && !_isPaused && _waitOperation is null && !_vmState.DoneExecuting)
@@ -113,6 +119,64 @@ internal sealed class Thread : Entity, IVmThread
         return true;
     }
 
+    internal void WaitForMedia(in EntityQuery query, bool allowSkip = false)
+    {
+        var targets = new List<Video>();
+        var audioTargets = new List<AudioEntity>();
+        foreach (Entity entity in World.Query(query))
+            foreach (Entity node in entity.DescendantsAndSelf())
+            {
+                if (node is Video video && video.IsPlaying) targets.Add(video);
+                if (node is AudioEntity audio && audio.IsPlaybackWaitActive) audioTargets.Add(audio);
+            }
+        if (targets.Count > 0 || audioTargets.Count > 0)
+            Wait(new WaitOperation(WaitCondition.MediaCompleted, query, null)
+                { Videos = targets.ToArray(), Audio = audioTargets.ToArray(), AllowMovieSkip = allowSkip });
+    }
+
+    internal void WaitForEntityActions(in EntityQuery query, TimeSpan? deadline = null)
+    {
+        var targets = new HashSet<Entity>();
+        foreach (Entity entity in World.Query(query))
+            foreach (Entity node in entity.DescendantsAndSelf())
+                if (!ReferenceEquals(node, this) && !node.IsPendingDestruction) targets.Add(node);
+        var wait = new WaitOperation(WaitCondition.EntityActionCompleted, query, deadline)
+            { ActionTargets = new List<Entity>(targets).ToArray() };
+        if (!EntityActionsCompleted(wait)) Wait(wait);
+    }
+
+    private static bool EntityActionsCompleted(in WaitOperation wait)
+    {
+        foreach (Entity entity in wait.ActionTargets ?? [])
+        {
+            if (entity.IsPendingDestruction) continue;
+            if (entity is Thread thread && !thread._vmState.DoneExecuting && !thread._isPaused) return false;
+            if (entity is AudioEntity audio && audio.IsPlaybackWaitActive) return false;
+            foreach (AnimationKind animation in s_actionAnimations)
+                if (entity.IsAnimationActive(animation)) return false;
+        }
+        return true;
+    }
+
+    private static bool MediaCompleted(in WaitOperation wait)
+    {
+        foreach (Video video in wait.Videos ?? [])
+            if (video.IsPlaying) return false;
+        foreach (AudioEntity audio in wait.Audio ?? [])
+            if (!audio.IsPendingDestruction && audio.IsPlaybackWaitActive) return false;
+        return true;
+    }
+
+    internal bool InterruptVideoWait(InputContext input)
+    {
+        if (_waitOperation is not { Condition: WaitCondition.MediaCompleted, Videos.Length: > 0 } wait || MediaCompleted(wait))
+            return false;
+        bool pressed = input.ConsumeMovieInterrupt();
+        if (!pressed || !wait.AllowMovieSkip) return false;
+        foreach (Video video in wait.Videos ?? []) video.Request(NsEntityAction.Stop);
+        return true;
+    }
+
     internal bool InterruptFrameSequenceWait(InputContext input)
     {
         if (_waitOperation is not { Condition: WaitCondition.FrameSequenceCompleted, FrameSequences: { } targets })
@@ -137,11 +201,16 @@ internal sealed class Thread : Entity, IVmThread
 
         InputContext input = ctx.InputContext;
         InterruptFrameSequenceWait(input);
+        InterruptVideoWait(input);
         return waitOperation switch
         {
             { Condition: WaitCondition.UserInput } => input.Consume(InputAction.Advance),
             { Condition: WaitCondition.EntityIdle, EntityQuery: { } query } => isTextIdle(query),
             { Condition: WaitCondition.FrameSequenceCompleted } => FrameSequencesCompleted(waitOperation),
+            { Condition: WaitCondition.MediaCompleted } => MediaCompleted(waitOperation),
+            { Condition: WaitCondition.EntityActionCompleted } => EntityActionsCompleted(waitOperation),
+            { Condition: WaitCondition.LegacyTransitionReady, ActionTargets: [LegacySceneTransition transition] }
+                => transition.IsCaptured || transition.IsPendingDestruction,
             {
                 Condition: WaitCondition.MoveCompleted or WaitCondition.FadeCompleted or WaitCondition.ZoomCompleted or WaitCondition.BezierMoveCompleted or WaitCondition.RotateCompleted or WaitCondition.TransitionCompleted,
                 EntityQuery: { } query
@@ -196,11 +265,18 @@ internal sealed class Thread : Entity, IVmThread
         TransitionCompleted,
         EntityIdle,
         FrameSequenceCompleted,
+        MediaCompleted,
+        EntityActionCompleted,
+        LegacyTransitionReady,
     }
 
     internal record struct WaitOperation(WaitCondition Condition, EntityQuery? EntityQuery, TimeSpan? Deadline)
     {
         public FrameSequence[]? FrameSequences { get; init; }
+        public Video[]? Videos { get; init; }
+        public AudioEntity[]? Audio { get; init; }
+        public Entity[]? ActionTargets { get; init; }
+        public bool AllowMovieSkip { get; init; }
         public static WaitOperation Suspend(TimeSpan deadline) => new(WaitCondition.Timeout, null, deadline);
         public static WaitOperation UserInput(TimeSpan? deadline) => new(WaitCondition.UserInput, null, deadline);
 

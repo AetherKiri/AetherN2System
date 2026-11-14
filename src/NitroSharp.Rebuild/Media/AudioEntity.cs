@@ -66,6 +66,7 @@ internal sealed class AudioEntity : Entity
     public TimeSpan Elapsed => _playbackStarted ? _stream?.Elapsed ?? TimeSpan.Zero : TimeSpan.Zero;
     public bool IsPlaying => _playbackStarted && _stream is { IsPlaying: true };
     public bool IsIdle => (_hasPlayed && !IsPlaying) || (_volume == 0 && _fadeDuration == 0);
+    internal bool IsPlaybackWaitActive => !_disposed && (_fadeDuration > 0 || (!_looping && IsPlaying));
     public float Volume => _volume;
 
     private MediaStream OpenMedia()

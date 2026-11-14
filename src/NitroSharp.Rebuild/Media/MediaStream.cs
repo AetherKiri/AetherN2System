@@ -59,6 +59,8 @@ namespace NitroSharp.Media
         /// All the frames have been decoded *and displayed*
         /// </summary>
         private bool _videoEnded;
+        private volatile bool _videoDecodingEnded;
+        private bool _displayedVideoFrame;
         private bool _loopingEnabled;
         private LoopRegion? _loopRegion;
         private TimeSpan? _seekRequest;
@@ -84,7 +86,14 @@ namespace NitroSharp.Media
             }
         }
 
-        public TimeSpan Elapsed => TimeSpan.FromSeconds(GetSecondsElapsed());
+        public TimeSpan Elapsed
+        {
+            get
+            {
+                double seconds = GetSecondsElapsed();
+                return TimeSpan.FromSeconds(double.IsFinite(seconds) ? seconds : 0);
+            }
+        }
 
         private struct Clock
         {
@@ -105,7 +114,7 @@ namespace NitroSharp.Media
                 _unpauseSignal = unpauseSignal;
                 _timestamp = double.NaN;
                 _serial = -1;
-                _timestampDrift = 0;
+                _timestampDrift = double.NaN;
                 LastUpdated = 0;
             }
 
@@ -441,6 +450,7 @@ namespace NitroSharp.Media
             }
 
             Debug.Assert(_video is not null);
+            if (!_unpauseSignal.IsSet) { frame = default; return false; }
             YCbCrBufferReader frames = VideoFrames;
             while (frames.PeekFrame(out frame))
             {
@@ -461,7 +471,7 @@ namespace NitroSharp.Media
                     }
                 }
 
-                double duration = frameDuration(_lastDisplayedFrameInfo, frame.GetInfo());
+                double duration = _displayedVideoFrame ? frameDuration(_lastDisplayedFrameInfo, frame.GetInfo()) : 0;
                 double targetDelay = CalcTargetDelay(duration);
 
                 if (time < _frameTimer + targetDelay)
@@ -475,17 +485,27 @@ namespace NitroSharp.Media
                     _frameTimer = time;
                 }
 
-                bool end = !double.IsNaN(frame.Timestamp)
-                   ? FrameIsClosestTo(frame.GetInfo(), Duration)
-                   : Duration.TotalSeconds - _videoClock.Get() - targetDelay < _videoFrameDuration;
-                _videoEnded = end && !_loopingEnabled;
-
                 _videoClock.Set(frame.Timestamp, frame.Serial);
                 _externalClock.SyncTo(_videoClock);
                 _lastDisplayedFrameInfo = frame.GetInfo();
+                _displayedVideoFrame = true;
                 return true;
             }
 
+            // MPEG duration metadata may be missing or include a timestamp offset.
+            // Completion follows the decoded queue and the final frame's display time.
+            if (_videoDecodingEnded && !frames.PeekFrame(out _)
+                && (!_displayedVideoFrame || _timer.Elapsed.TotalSeconds >= _frameTimer + _lastDisplayedFrameInfo.Duration))
+            {
+                if (_loopingEnabled && _loopRegion is null)
+                {
+                    // Loop only after presenting this iteration. Seeking from the
+                    // decoder worker invalidates queued frames of short movies.
+                    _videoDecodingEnded = false;
+                    Seek(TimeSpan.Zero);
+                }
+                else _videoEnded = true;
+            }
             return false;
         }
 
@@ -555,13 +575,13 @@ namespace NitroSharp.Media
                     if (_audio is not null)
                     {
                         Interlocked.Increment(ref _audio.Serial);
-                        _audio.DecoderDoneSeeking = false;
+                        _audio.DecoderDoneSeeking = seekTarget <= TimeSpan.Zero;
                         _audio.SeekRequest = seekTarget;
                     }
                     if (_video is not null)
                     {
                         Interlocked.Increment(ref _video.Serial);
-                        _video.DecoderDoneSeeking = false;
+                        _video.DecoderDoneSeeking = seekTarget <= TimeSpan.Zero;
                         _video.SeekRequest = seekTarget;
                     }
 
@@ -795,7 +815,7 @@ namespace NitroSharp.Media
                     {
                         bytesBuffered = 0;
                         await writer.FlushAsync();
-                        if (_loopingEnabled && _loopRegion is null)
+                        if (_loopingEnabled && _loopRegion is null && _video is null)
                         {
                             Seek(TimeSpan.Zero);
                         }
@@ -875,11 +895,8 @@ namespace NitroSharp.Media
                 {
                     if (frame.Eof)
                     {
-                        if (_loopingEnabled && _loopRegion is null)
-                        {
-                            Seek(TimeSpan.Zero);
-                        }
-                        else if (!_loopingEnabled)
+                        _videoDecodingEnded = true;
+                        if (!_loopingEnabled)
                         {
                             break;
                         }

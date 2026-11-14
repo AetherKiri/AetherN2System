@@ -10,6 +10,8 @@ namespace NitroSharp.Graphics;
 internal sealed class FrameSequence : RenderItem
 {
     private readonly SpriteTexture[] _frames;
+    private readonly string[] _frameSources;
+    private readonly string? _finalFrameSource;
     private readonly List<SpriteTexture> _owned = [];
     private readonly SpriteTexture? _finalFrame;
     private readonly double _interval;
@@ -33,6 +35,7 @@ internal sealed class FrameSequence : RenderItem
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(frames.Length);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(ticksPerFrame);
         _frames = new SpriteTexture[frames.Length];
+        _frameSources = new string[frames.Length];
         _interval = 33.0 * ticksPerFrame;
         _loop = loop;
         _completed = completed;
@@ -48,9 +51,11 @@ internal sealed class FrameSequence : RenderItem
                 if (i == 0 && texture is null)
                     throw new FileNotFoundException("The first frame of an animation must exist.", frames[i]);
                 _frames[i] = texture ?? _frames[i - 1];
+                _frameSources[i] = texture is not null ? frames[i] : _frameSources[i - 1];
             }
             _current = _frames[0];
             _finalFrame = string.IsNullOrEmpty(finalFrame) ? null : loadFrame(finalFrame);
+            _finalFrameSource = _finalFrame is not null ? finalFrame : null;
         }
         catch
         {
@@ -74,6 +79,8 @@ internal sealed class FrameSequence : RenderItem
     public bool IsComplete { get; private set; }
     internal int FrameIndex { get; private set; }
     internal SpriteTexture CurrentTexture => _current;
+    internal string CurrentSource => _removeRequested ? ""
+        : IsComplete && _finalFrameSource is not null ? _finalFrameSource : _frameSources[FrameIndex];
 
     public override bool IsAnimationActive(AnimationKind animationKind)
         => animationKind == AnimationKind.FrameSequence

@@ -45,7 +45,7 @@ public struct SmallList<T>
     public void Add(in T item)
     {
         Span<T> fixedElements = _fixedItems.AsSpan();
-        if (_count < MaxFixed)
+        if (_array is null && _count < MaxFixed)
         {
             fixedElements[_count++] = item;
         }
@@ -78,7 +78,11 @@ public struct SmallList<T>
         }
     }
 
-    public void Clear() => _count = 0;
+    public void Clear()
+    {
+        AsSpan().Clear();
+        _count = 0;
+    }
 
     private T SwapRemove(int index)
     {
@@ -89,13 +93,6 @@ public struct SmallList<T>
         ptr = last;
         last = default!;
 
-        if (_array is not null && _count <= MaxFixed)
-        {
-            elements = elements[1..];
-            elements.CopyTo(_fixedItems.AsSpan());
-            elements.Clear();
-        }
-
         return elem;
     }
 
@@ -104,7 +101,7 @@ public struct SmallList<T>
         get
         {
             if (index >= _count) { outOfRange(); }
-            if (_count <= MaxFixed)
+            if (_array is null)
             {
                 Span<T> fixedElements = _fixedItems.AsSpan();
                 return ref fixedElements[index];
@@ -119,14 +116,14 @@ public struct SmallList<T>
 
     public Span<T> AsSpan()
     {
-        return _count <= MaxFixed
+        return _array is null
             ? _fixedItems.AsSpan(_count)
             : _array.AsSpan(0, _count);
     }
 
     public readonly ReadOnlySpan<T> AsReadOnlySpan()
     {
-        return _count <= MaxFixed
+        return _array is null
             ? MemoryMarshal.CreateReadOnlySpan(ref Unsafe.AsRef(in _fixedItems.Item0), _count)
             : _array.AsSpan(0, _count);
     }

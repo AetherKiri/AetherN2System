@@ -139,7 +139,7 @@ internal abstract class RenderItem : Entity, IComparable<RenderItem>
             if (transition.ProgressValue <= 0) return;
             if (transition.Mask is not { } mask) return;
             batch.PushTransitionQuad(quad, texture, context.Content.Get(mask), transition.ProgressValue,
-                transition.Feather, FilterMode, scissor);
+                transition.Feather, FilterMode, scissor, blendMode: BlendMode);
         }
         else batch.PushQuad(quad, texture, alphaMask, alphaMaskPosition, BlendMode, FilterMode, scissor);
     }

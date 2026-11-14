@@ -20,6 +20,7 @@ public readonly struct EntityQuery
 
     public static EntityQuery? TryParse(string query)
     {
+        if (query.EndsWith('/')) { return null; }
         EntityQueryScope? prevScope = null;
         bool forceEnd = false;
         SmallList<EntityQueryPart> parts = new();
@@ -95,9 +96,12 @@ public readonly record struct EntityQueryPart(EntityPattern Pattern, EntityQuery
         if (patternText.Length == 0) { return null; }
 
         bool containsWildcard = false;
+        // The native selector removes one scope marker; additional leading @ characters belong to the alias.
+        bool leadingAliasPrefix = scope is EntityQueryScope.CurrentAliases or EntityQueryScope.AllAliases;
         foreach (char c in patternText)
         {
-            if (c is '<' or '>' or '@' or '/') { return null; }
+            if (c is '<' or '>' or '/' || c == '@' && !leadingAliasPrefix) { return null; }
+            leadingAliasPrefix &= c == '@';
             containsWildcard |= c == '*';
         }
 

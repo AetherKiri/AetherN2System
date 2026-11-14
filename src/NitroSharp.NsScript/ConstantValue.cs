@@ -276,6 +276,12 @@ namespace NitroSharp.NsScript
             {
                 (BuiltInType.Numeric, BuiltInType.Numeric)
                     => Number(left.AsNumber()!.Value + right.AsNumber()!.Value),
+                (BuiltInType.DeltaNumeric, BuiltInType.Numeric or BuiltInType.DeltaNumeric)
+                    => Delta(left.FloatValue + right.FloatValue),
+                (BuiltInType.Numeric, BuiltInType.DeltaNumeric)
+                    => Delta(left.FloatValue + right.FloatValue),
+                (BuiltInType.String, BuiltInType.DeltaNumeric) when left.IsAtCharacter
+                    => Delta(right.FloatValue),
                 (BuiltInType.Numeric, BuiltInType.String)
                     => integerString(left, right),
                 (BuiltInType.String, BuiltInType.Numeric)
@@ -298,6 +304,10 @@ namespace NitroSharp.NsScript
             {
                 (BuiltInType.Numeric, BuiltInType.Numeric)
                     => Number(left.AsNumber()!.Value - right.AsNumber()!.Value),
+                (BuiltInType.DeltaNumeric, BuiltInType.Numeric or BuiltInType.DeltaNumeric)
+                    => Delta(left.FloatValue - right.FloatValue),
+                (BuiltInType.Numeric, BuiltInType.DeltaNumeric)
+                    => Delta(left.FloatValue - right.FloatValue),
                 _   => InvalidBinOp("-", left.Type, right.Type)
             };
         }

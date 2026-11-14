@@ -286,7 +286,7 @@ public sealed class NsScriptVM
                     break;
                 case Opcode.Delta:
                     val = ref evalStack.Peek();
-                    if (val.AsNumber() is { } num)
+                    if ((val.AsNumber() ?? val.AsDeltaNumber()) is { } num)
                     {
                         val = ConstantValue.Delta(num);
                     }
