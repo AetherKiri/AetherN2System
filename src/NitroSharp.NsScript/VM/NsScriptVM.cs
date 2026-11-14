@@ -110,6 +110,16 @@ public sealed class NsScriptVM
         return new NsScriptThreadState(frame);
     }
 
+    public NsScriptThreadState CreateDialogueCodeThread(in DialogueBlockToken token,
+        CompiledDialogueBlockPart.CodeBlock code)
+    {
+        var frame = new CallFrame(token.Module, (ushort)token.SubroutineIndex, code.Position)
+        {
+            EndPosition = code.Position + code.Length
+        };
+        return new NsScriptThreadState(frame);
+    }
+
     internal ref ConstantValue GetVariable(int index)
     {
         ref ConstantValue val = ref _variables[index];
@@ -170,6 +180,11 @@ public sealed class NsScriptVM
         while (true)
         {
             frame.ProgramCounter = program.Position;
+            if (frame.EndPosition is { } end && program.Position >= end)
+            {
+                thread.CallFrameStack.Pop();
+                return TickResult.Ok;
+            }
             if (++instructions > InstructionBudget) return TickResult.Yield;
             Opcode opcode = program.NextOpcode();
             if (opcode is >= Opcode.LoadImm0 and <= Opcode.LoadFlag)
@@ -321,6 +336,8 @@ public sealed class NsScriptVM
                     evalStack.Push(ConstantValue.BezierCurve(curve));
                     break;
                 case Opcode.Dispatch:
+                    builtins.DialogueCallerModule = thread.CallFrameStack.Count > 1
+                        ? thread.CallFrameStack.Peek(1).Module : thisModule;
                     dispatchBuiltIn(ref program, ref thread);
                     frame.ProgramCounter = program.Position;
                     return TickResult.Ok;

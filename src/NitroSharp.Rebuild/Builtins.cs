@@ -6,6 +6,7 @@ using NitroSharp.Graphics;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.Primitives;
 using NitroSharp.NsScript.VM;
+using NitroSharp.Text;
 using Veldrid;
 using ZeroLog;
 
@@ -112,9 +113,56 @@ internal sealed class Builtins : BuiltInFunctions
     {
         if (ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
         {
-            _world.AddEntity(new TextBlock(name, parent, priority, markup, _ctx.RenderContext.Text))
+            uint maxWidth = width.Value is { } w ? (uint)Math.Max(0, w) : uint.MaxValue;
+            uint maxHeight = height.Value is { } h ? (uint)Math.Max(0, h) : uint.MaxValue;
+            _world.AddEntity(new TextBlock(name, parent, priority, markup, _ctx.RenderContext.Text,
+                new DesignSizeU(maxWidth, maxHeight), _world.CurrentProcess.FontSettings,
+                new Vector4(0, 15, 34, 28)))
                 .WithPosition(_ctx.RenderContext, x, y);
         }
+    }
+
+    public override void SetFont(string family, uint size, NsColor color, NsColor outlineColor,
+        NsFontWeight weight, NsOutlineOffset outlineOffset)
+    {
+        // Keep the loaded profile font when the script names a platform-specific font.
+        _world.CurrentProcess.FontSettings = _world.CurrentProcess.FontSettings with
+        {
+            DefaultFontSize = new PtFontSize(size),
+            DefaultTextColor = color.ToRgbaFloat().ToVector4(),
+            DefaultOutlineColor = outlineOffset != NsOutlineOffset.Unspecified
+                ? outlineColor.ToRgbaFloat().ToVector4() : null
+        };
+    }
+
+    public override void CreateDialogueBox(in EntityPath entityPath, int priority,
+        NsCoordinate x, NsCoordinate y, uint width, uint height, bool inheritTransform)
+    {
+        if (ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
+        {
+            _world.AddEntity(new DialogueBox(name, parent, priority,
+                new DesignSize(width, height), inheritTransform))
+                .WithPosition(_ctx.RenderContext, x, y);
+        }
+    }
+
+    public override void LoadDialogueBlock(in DialogueBlockToken blockToken,
+        uint maxWidth, uint maxHeight, int letterSpacing, int lineSpacing)
+    {
+        EntityPath path = EntityPath.Parse($"{blockToken.BoxName}/{blockToken.BlockName}");
+        if (ResolveEntityPath(path, out EntityName name, out Entity? parent) && parent is RenderItem box)
+        {
+            var page = _world.AddEntity(new DialoguePage(name, parent, box.Priority,
+                blockToken, maxWidth, maxHeight, lineSpacing));
+            page.Transform.Position = box.Transform.Position;
+            page.SetAlias(EntityAlias.Parse(blockToken.BlockName));
+        }
+    }
+
+    public override void WaitText(in EntityQuery query, TimeSpan timeout)
+    {
+        CurrentThread.Wait(new Thread.WaitOperation(Thread.WaitCondition.EntityIdle, query,
+            timeout > TimeSpan.Zero ? Clock.Elapsed + timeout : null));
     }
 
     public override int GetWidth(in EntityQuery query)

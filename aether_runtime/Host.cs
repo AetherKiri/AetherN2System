@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -172,6 +173,7 @@ internal static unsafe class Exports
     {
         string? file = FindFile(root, "aether-n2system.json") ?? FindFile(root, "profiles.json");
         JsonObjectBuilder builder = new(file);
+        ApplyKnownInstallDefaults(builder, root);
         builder.Default("startupScript", "boot.nss");
         builder.Default("product.name", Path.GetFileName(root));
         builder.Default(
@@ -210,6 +212,20 @@ internal static unsafe class Exports
         return null;
     }
 
+    private static void ApplyKnownInstallDefaults(JsonObjectBuilder builder, string root)
+    {
+        // Detect the two supported install layouts using their launchers,
+        // never a user-chosen parent folder name. Explicit profile values win.
+        bool main = FindFile(root, "Muramasa_chs.exe") is not null || FindFile(root, "Muramasa.exe") is not null;
+        bool extra = FindFile(root, "MuramasaAD_cn.exe") is not null || FindFile(root, "MuramasaAD.exe") is not null;
+        if (!main && !extra) return;
+        builder.Default("startupScript", "0_boot.nss");
+        builder.Default("designResolution", "1024x576");
+        builder.Default("dev.npaScheme", extra ? "muramasa-ad" : "muramasa");
+        builder.Default("dev.archiveEncoding", main && FindFile(root, "Muramasa_chs.exe") is not null ? "gbk" : "shift-jis");
+        builder.Default("dev.scriptEncoding", main && FindFile(root, "Muramasa_chs.exe") is not null ? "gbk" : "shift-jis");
+    }
+
     private static void PreparePackedScripts(
         JsonObjectBuilder builder,
         string root,
@@ -233,7 +249,8 @@ internal static unsafe class Exports
         );
         using NitroSharp.Content.NpaFile archive = NitroSharp.Content.NpaFile.TryLoad(
             mapped,
-            Encoding.GetEncoding("shift-jis")
+            Encoding.GetEncoding(builder.EffectiveString("dev.archiveEncoding") ?? "shift-jis"),
+            builder.EffectiveString("dev.npaScheme")
         ) ?? throw new InvalidDataException("nss.npa has an unsupported signature.");
         string cache = Path.Combine(writable, "scripts-" + Guid.NewGuid().ToString("N"), "nss");
         Directory.CreateDirectory(cache);
@@ -464,7 +481,10 @@ internal sealed class JsonObjectBuilder
         if (_root["dev.mounts"] is not null || Active?["dev.mounts"] is not null)
             return;
         var mounts = new System.Text.Json.Nodes.JsonArray();
-        foreach (string path in Directory.EnumerateFiles(content, "*.npa"))
+        foreach (string path in Directory.EnumerateFiles(content)
+            .Where(p => Path.GetExtension(p).Equals(".npa", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(p => Path.GetFileNameWithoutExtension(p).EndsWith("-patch", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(p => Path.GetFileNameWithoutExtension(p), StringComparer.OrdinalIgnoreCase))
         {
             if (Path.GetFileName(path).Equals("nss.npa", StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -472,12 +492,22 @@ internal sealed class JsonObjectBuilder
                 (System.Text.Json.Nodes.JsonNode)
                     new System.Text.Json.Nodes.JsonObject
                     {
-                        ["mount"] = Path.GetFileNameWithoutExtension(path),
+                        ["mount"] = MountName(Path.GetFileNameWithoutExtension(path)),
                         ["archive"] = Path.GetFileName(path),
                     }
             );
         }
         _root["dev.mounts"] = mounts;
+    }
+
+    private static string MountName(string name)
+    {
+        string normalized = name.ToLowerInvariant();
+        if (normalized.EndsWith("-patch")) normalized = normalized[..^6];
+        // Only combine known split resource packs; arbitrary digit-ending
+        // mounts in other games keep their authored name.
+        if (normalized is "cg2" or "sound2" or "voice2") normalized = normalized[..^1];
+        return normalized;
     }
 
     public byte[] Bytes() => Encoding.UTF8.GetBytes(_root.ToJsonString());

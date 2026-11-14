@@ -1,4 +1,4 @@
-﻿using NitroSharp.NsScript.Utilities;
+using NitroSharp.NsScript.Utilities;
 
 namespace NitroSharp.NsScript.VM;
 
@@ -21,7 +21,7 @@ public struct NsScriptThreadState
         CallFrameStack.Push(callFrame);
     }
 
-    internal bool DoneExecuting => CallFrameStack.Count == 0;
+    public bool DoneExecuting => CallFrameStack.Count == 0;
 
     internal ref CallFrame CurrentFrame => ref CallFrameStack.Peek();
 }
@@ -32,6 +32,7 @@ internal struct CallFrame(NsxModule module, ushort subroutineIndex, CodeOffset p
     public readonly ushort SubroutineIndex = subroutineIndex;
 
     public CodeOffset ProgramCounter = pc;
+    public int? EndPosition;
 
     public ref readonly SubroutineRuntimeInfo RuntimeInfo =>
         ref Module.GetSubroutineRuntimeInfo(SubroutineIndex);

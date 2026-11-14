@@ -7,14 +7,14 @@ namespace NitroSharp;
 
 internal sealed class Process : Entity
 {
-    private readonly FontSettings _fontSettings;
+    public FontSettings FontSettings { get; set; }
     private readonly List<Entity> _updateList = [];
     private readonly List<RenderItem> _renderList = [];
 
     public Process(EntityName name, Entity? parent, FontSettings fontSettings)
         : base(name, parent)
     {
-        _fontSettings = fontSettings;
+        FontSettings = fontSettings;
         Aliases = new AliasMap(this);
     }
 

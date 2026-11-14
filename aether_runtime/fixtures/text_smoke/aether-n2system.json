@@ -1,0 +1,10 @@
+{
+  "product.name": "Aether N2 text fixture",
+  "product.displayName": "Aether N2 text fixture",
+  "designResolution": "640x360",
+  "startupScript": "boot.nss",
+  "font.size": 22,
+  "dev.contentRoot": ".",
+  "dev.scriptRoot": "nss",
+  "dev.useUtf8": true
+}

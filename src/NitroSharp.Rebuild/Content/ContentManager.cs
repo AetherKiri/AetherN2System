@@ -78,7 +78,8 @@ internal sealed class ContentManager : IDisposable
         string rootDirectory,
         TextureLoader textureLoader,
         MountPoint[]? mountPoints,
-        Encoding? encoding = null)
+        Encoding? encoding = null,
+        string? npaScheme = null)
     {
         RootDirectory = rootDirectory;
         _textureLoader = textureLoader;
@@ -90,7 +91,7 @@ internal sealed class ContentManager : IDisposable
         _root = new VfsNode();
         _archiveLoadFuncs =
         [
-            NpaFile.TryLoad,
+            (file, names) => NpaFile.TryLoad(file, names, npaScheme),
             AfsFile.TryLoad
         ];
         if (mountPoints is not null)

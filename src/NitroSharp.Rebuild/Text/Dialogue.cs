@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using NitroSharp.NsScript;
@@ -9,8 +9,6 @@ namespace NitroSharp.Text;
 
 internal sealed class Dialogue
 {
-    private static readonly MarkupTreeFlattener s_treeFlattener = new();
-
     private Dialogue(ImmutableArray<DialogueSegment> segments, VoiceSegment? voice)
     {
         Segments = segments;
@@ -23,7 +21,7 @@ internal sealed class Dialogue
     public static Dialogue Parse(string markup, FontSettings fontConfig)
     {
         var root = MarkupContent.Parse(markup);
-        return s_treeFlattener.FlattenContent(root, fontConfig);
+        return new MarkupTreeFlattener().FlattenContent(root, fontConfig);
     }
 
     public static TextSegment ParseTextSegment(string text, FontSettings fontSettings)
@@ -81,7 +79,7 @@ internal sealed class Dialogue
         public override void VisitFontElement(FontElement fontElement)
         {
             TextRunData oldData = _textRunData;
-            _textRunData.FontSize = fontElement.Size;
+            _textRunData.FontSize = fontElement.Size ?? oldData.FontSize;
             if (fontElement.Color.HasValue)
             {
                 NsColor color = fontElement.Color.Value;
@@ -131,6 +129,7 @@ internal sealed class Dialogue
             TextRunData oldData = _textRunData;
             _textRunData.RubyText = rubyElement.RubyText;
             Visit(rubyElement.RubyBase);
+            FinalizeTextRun();
             _textRunData = oldData;
         }
 

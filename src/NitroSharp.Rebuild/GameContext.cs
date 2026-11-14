@@ -349,7 +349,9 @@ internal sealed class GameContext : IDisposable
         var content = new ContentManager(
             gameProfile.ContentRoot,
             textureLoader,
-            gameProfile.MountPoints
+            gameProfile.MountPoints,
+            gameProfile.ArchiveEncoding is { } archiveEncoding ? Encoding.GetEncoding(archiveEncoding) : null,
+            gameProfile.NpaScheme
         );
         return content;
     }
@@ -394,7 +396,9 @@ internal sealed class GameContext : IDisposable
             }
 
             Encoding? sourceEncoding = null;
-            if (!gameProfile.DetectEncoding)
+            if (gameProfile.ScriptEncoding is { } scriptEncoding)
+                sourceEncoding = Encoding.GetEncoding(scriptEncoding);
+            else if (!gameProfile.DetectEncoding)
             {
                 sourceEncoding = gameProfile.UseUtf8 ? Encoding.UTF8 : SourceText.DefaultEncoding;
             }

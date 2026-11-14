@@ -120,5 +120,7 @@ public enum BuiltInFunction : byte
     assert,
     assert_eq,
     fail,
-    fail_msg
+    fail_msg,
+    Count,
+    VariableValue
 }

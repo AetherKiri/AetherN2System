@@ -61,6 +61,12 @@ internal static unsafe class NativeDependencies
 
     private static nint Resolve(string name, Assembly assembly, DllImportSearchPath? path)
     {
+        if (assembly == typeof(FFmpeg.AutoGen.ffmpeg).Assembly)
+        {
+            string mediaName = OperatingSystem.IsWindows() ? "aether_n2system_media.dll"
+                : OperatingSystem.IsMacOS() ? "libaether_n2system_media.dylib" : "libaether_n2system_media.so";
+            return NativeLibrary.Load(Path.Combine(DirectoryPath, mediaName));
+        }
         foreach (string directory in new[] { DirectoryPath, Path.Combine(DirectoryPath, "native") })
         foreach (
             string candidate in new[]

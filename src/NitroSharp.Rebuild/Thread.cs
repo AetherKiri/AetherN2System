@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using NitroSharp.Input;
+using NitroSharp.Graphics;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.VM;
 
@@ -30,6 +31,13 @@ internal sealed class Thread : Entity, IVmThread
         }
     }
 
+    public void Restart(NsScriptThreadState state)
+    {
+        Debug.Assert(_vmState.DoneExecuting);
+        _vmState = state;
+        _waitOperation = null;
+    }
+
     public void Wait(WaitOperation waitOperation)
     {
         Debug.Assert(_waitOperation is null, "Thread is already suspended.");
@@ -49,12 +57,22 @@ internal sealed class Thread : Entity, IVmThread
         return waitOperation switch
         {
             { Condition: WaitCondition.UserInput } => input.Consume(InputAction.Advance),
+            { Condition: WaitCondition.EntityIdle, EntityQuery: { } query } => isTextIdle(query),
             {
                 Condition: WaitCondition.MoveCompleted or WaitCondition.FadeCompleted or WaitCondition.ZoomCompleted,
                 EntityQuery: { } query
             } => hasAnimationCompleted(query, waitOperation.Condition),
             _ => false
         };
+
+        bool isTextIdle(in EntityQuery query)
+        {
+            foreach (Entity entity in World.Query(query))
+            {
+                if (entity is DialoguePage { IsIdle: false }) { return false; }
+            }
+            return true;
+        }
 
         bool hasAnimationCompleted(in EntityQuery query, WaitCondition condition)
         {

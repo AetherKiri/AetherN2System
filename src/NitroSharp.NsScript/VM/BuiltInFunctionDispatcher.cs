@@ -209,6 +209,12 @@ internal sealed class BuiltInFunctionDispatcher
             case BuiltInFunction.Platform:
                 Platform();
                 break;
+            case BuiltInFunction.Count:
+                SetResult(ConstantValue.Number(_impl.Count(args.TakeOpt(ConstantValue.Null))));
+                break;
+            case BuiltInFunction.VariableValue:
+                SetResult(ConstantValue.Boolean(_impl.VariableValue(args.AsSpan(0))));
+                break;
             case BuiltInFunction.ModuleFileName:
                 ModuleFileName();
                 break;
@@ -621,27 +627,26 @@ internal sealed class BuiltInFunctionDispatcher
 
     private void LoadText(ref ArgConsumer args)
     {
-        // string subroutineName = args.TakeString();
-        // string boxName = args.TakeString();
-        // string blockName = args.TakeString();
-        // uint maxWidth = args.TakeUInt();
-        // uint maxHeight = args.TakeUInt();
-        // int letterSpacing = args.TakeInt();
-        // int lineSpacing = args.TakeInt();
-        //
-        // if (blockName.StartsWith('@'))
-        // {
-        //     blockName = blockName[1..];
-        // }
-        //
-        // NsxModule module = _impl.CurrentThread.CallFrameStack.Peek(1).Module;
-        // int sub = module.LookupSubroutineIndex(subroutineName);
-        // ref readonly SubroutineRuntimeInfo srti = ref module.GetSubroutineRuntimeInfo(sub);
-        // int blockIndex = srti.LookupDialogueBlockIndex(blockName);
-        // int codeOffset = module.GetSubroutine(sub).DialogueBlockOffsets[blockIndex];
-        //
-        // var token = new DialogueBlockToken(boxName, blockName, module, sub, codeOffset);
-        // _impl.LoadDialogueBlock(token, maxWidth, maxHeight, letterSpacing, lineSpacing);
+        string subroutineName = args.TakeString();
+        string boxName = args.TakeString();
+        string blockName = args.TakeString().TrimStart('@');
+        uint maxWidth = args.TakeUInt();
+        uint maxHeight = args.TakeUInt();
+        int letterSpacing = args.TakeInt();
+        int lineSpacing = args.TakeInt();
+
+        NsxModule module = _impl.DialogueCallerModule ?? _impl.CurrentModule;
+        if (!module.TryLookupSubroutineIndex(subroutineName, out int sub))
+        {
+            module = _impl.CurrentModule;
+            if (!module.TryLookupSubroutineIndex(subroutineName, out sub))
+            {
+                throw new InvalidOperationException($"Dialogue subroutine '{subroutineName}' was not found.");
+            }
+        }
+        int blockIndex = module.GetSubroutineRuntimeInfo(sub).LookupDialogueBlockIndex(blockName);
+        var token = new DialogueBlockToken(boxName, blockName, module, sub, blockIndex);
+        _impl.LoadDialogueBlock(token, maxWidth, maxHeight, letterSpacing, lineSpacing);
     }
 
     private void WaitText(ref ArgConsumer args)

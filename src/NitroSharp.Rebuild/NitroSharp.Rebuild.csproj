@@ -32,7 +32,6 @@
 
     <PackageReference Include="FreeType.Binaries" Version="0.42.0" />
     <PackageReference Include="OpenALSoft.Binaries" Version="0.42.0" />
-    <PackageReference Include="FFmpeg.Binaries" Version="0.42.0" />
   </ItemGroup>
 
   <ItemGroup>

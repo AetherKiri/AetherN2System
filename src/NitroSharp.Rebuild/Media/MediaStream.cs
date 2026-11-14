@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -22,7 +22,7 @@ namespace NitroSharp.Media
     internal sealed class MediaStream : IDisposable
     {
         private const int IoBufferSize = 4096;
-        private const int ErrorEAgain = -11;
+        private static readonly int ErrorEAgain = OperatingSystem.IsMacOS() ? -35 : -11;
 
         private const double SyncThresholdMin = 0.04;
         private const double SyncThresholdMax = 0.1;

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using FFmpeg.AutoGen;
 using static NitroSharp.Media.FFmpegUtil;
@@ -17,23 +17,30 @@ internal unsafe class Resampler : IDisposable
     public Resampler(AVCodecContext* codecCtx, in AudioParameters outParams)
     {
         _outParams = outParams;
-        _ctx = ffmpeg.swr_alloc_set_opts(
-            null,
-            GetAvChannelLayout(outParams.ChannelLayout),
-            OutSampleFormat,
-            (int)outParams.SampleRate,
-            (long)codecCtx->channel_layout,
-            codecCtx->sample_fmt, codecCtx->sample_rate,
-            0, null
-        );
-
-        CheckResult(
-            ffmpeg.av_opt_set_int(_ctx, "in_channel_count", codecCtx->channels, 0)
-        );
-        CheckResult(
-            ffmpeg.av_opt_set_int(_ctx, "out_channel_count", outParams.ChannelCount, 0)
-        );
-        CheckResult(ffmpeg.swr_init(_ctx));
+        AVChannelLayout outputLayout = default;
+        ffmpeg.av_channel_layout_default(&outputLayout, outParams.ChannelCount);
+        try
+        {
+            fixed (SwrContext** context = &_ctx)
+            {
+                CheckResult(ffmpeg.swr_alloc_set_opts2(
+                    context,
+                    &outputLayout, OutSampleFormat, (int)outParams.SampleRate,
+                    &codecCtx->ch_layout, codecCtx->sample_fmt, codecCtx->sample_rate,
+                    0, null
+                ));
+            }
+            CheckResult(ffmpeg.swr_init(_ctx));
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
+        finally
+        {
+            ffmpeg.av_channel_layout_uninit(&outputLayout);
+        }
     }
 
     public int GetBufferSize(TimeSpan duration)
@@ -68,13 +75,14 @@ internal unsafe class Resampler : IDisposable
         SwrContext* ctx = _ctx;
         fixed (byte* dst = &dstBuffer[0])
         {
-            byte_ptrArray8 data = srcFrame.data;
+            byte_ptr8 data = srcFrame.data;
             int actualSamplesPerChannel = ffmpeg.swr_convert(
                 ctx, &dst,
                 bufferRequirements.SamplesPerChannel,
-                (byte**)&data,
+                srcFrame.extended_data is not null ? srcFrame.extended_data : (byte**)&data,
                 srcFrame.nb_samples
             );
+            CheckResult(actualSamplesPerChannel);
             int bytesWritten = ffmpeg.av_samples_get_buffer_size(
                 null, _outParams.ChannelCount,
                 actualSamplesPerChannel,

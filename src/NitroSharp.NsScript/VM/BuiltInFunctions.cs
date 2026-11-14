@@ -14,6 +14,7 @@ public abstract class BuiltInFunctions
     protected NsScriptVM VM => _vm!;
 
     [NotNull] public NsxModule? CurrentModule { get; internal set; }
+    internal NsxModule? DialogueCallerModule { get; set; }
 
     protected virtual void NotImplemented([CallerMemberName] string functionName = "")
         => throw new NotImplementedException();
@@ -33,6 +34,8 @@ public abstract class BuiltInFunctions
 
     public virtual string GetCurrentModuleName() => NotImplemented<string>();
     public virtual int GetSoundAmplitude(string characterName) => NotImplemented<int>();
+    public virtual int Count(in ConstantValue value) => value.IsNull ? 0 : 0;
+    public virtual bool VariableValue(ReadOnlySpan<ConstantValue> arguments) => false;
     public virtual int GetHeight(in EntityQuery query) => NotImplemented<int>();
     public virtual int GetWidth(in EntityQuery query) => NotImplemented<int>();
     public virtual int GetMediaDuration(in EntityQuery query) => NotImplemented<int>();

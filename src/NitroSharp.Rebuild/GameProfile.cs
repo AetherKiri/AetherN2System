@@ -28,6 +28,9 @@ public sealed class GameProfile
     public required int PlatformId { get; init; }
 
     public required MountPoint[]? MountPoints { get; init; }
+    public string? ArchiveEncoding { get; init; }
+    public string? ScriptEncoding { get; init; }
+    public string? NpaScheme { get; init; }
     internal string? WritableDirectory { get; set; }
 
     public static GameProfile Read(Stream stream)
@@ -69,6 +72,9 @@ public sealed class GameProfile
             SkipUpToDateCheck = true,
             SysScripts = new SystemScripts(getStringOpt("startupScript") ?? "boot.nss"),
             MountPoints = mountPoints,
+            ArchiveEncoding = getStringOpt("dev.archiveEncoding"),
+            ScriptEncoding = getStringOpt("dev.scriptEncoding"),
+            NpaScheme = getStringOpt("dev.npaScheme"),
             IconPathPatterns = new IconPathPatterns
             {
                 WaitLine = new IconPathPattern(getString("icons.waitLine")),

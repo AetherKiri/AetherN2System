@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -318,7 +318,7 @@ public readonly struct Subroutine
         for (int i = 0; i < dialogueBlockCount; i++)
         {
             reader.Position = (BytecodeStart - subStart) + dialogueBlockOffsets[i];
-            dialogueBlocks.Add(new CompiledDialogueBlock(ref reader));
+            dialogueBlocks.Add(new CompiledDialogueBlock(ref reader, subStart));
         }
 
         DialogueBlocks = dialogueBlocks.ToImmutable();
@@ -330,13 +330,13 @@ public readonly struct Subroutine
 
 public readonly struct CompiledDialogueBlock
 {
-    internal CompiledDialogueBlock(ref BufferReader reader)
+    internal CompiledDialogueBlock(ref BufferReader reader, int subroutineStart)
     {
         int partCount = reader.ReadByte();
         var parts = ImmutableArray.CreateBuilder<CompiledDialogueBlockPart>(partCount);
         for (int i = 0; i < partCount; i++)
         {
-            parts.Add(CompiledDialogueBlockPart.Deserialize(ref reader));
+            parts.Add(CompiledDialogueBlockPart.Deserialize(ref reader, subroutineStart));
         }
 
         Parts = parts.ToImmutable();
@@ -354,14 +354,14 @@ public abstract class CompiledDialogueBlockPart
         CodeBlock = 2
     }
 
-    internal static CompiledDialogueBlockPart Deserialize(ref BufferReader reader)
+    internal static CompiledDialogueBlockPart Deserialize(ref BufferReader reader, int subroutineStart)
     {
         var kind = (Kind)reader.ReadByte();
         return kind switch
         {
             Kind.Markup => new Markup(ref reader),
             Kind.BlankLine => BlankLine.Instance,
-            Kind.CodeBlock => new CodeBlock(ref reader),
+            Kind.CodeBlock => new CodeBlock(ref reader, subroutineStart),
             _ => throw ThrowHelper.UnexpectedValueOf<Kind>()
         };
     }
@@ -389,14 +389,17 @@ public abstract class CompiledDialogueBlockPart
 
     public sealed class CodeBlock : CompiledDialogueBlockPart
     {
-        internal CodeBlock(ref BufferReader reader)
+        internal CodeBlock(ref BufferReader reader, int subroutineStart)
         {
-            ushort length = reader.ReadUInt16LE();
-            Position = reader.Position;
+            int length = reader.ReadUInt16LE() - sizeof(ushort);
+            if (length < 0) { throw new InvalidDataException("Invalid dialogue code block length."); }
+            Position = subroutineStart + reader.Position;
+            Length = length;
             reader.Position += length;
         }
 
         internal int Position { get; }
+        internal int Length { get; }
     }
 }
 
