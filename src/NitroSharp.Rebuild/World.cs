@@ -66,6 +66,13 @@ internal sealed class World : EntityScope
         }
     }
 
+    public void DisposeAll()
+    {
+        foreach (Process process in _processes.ToArray()) CommitDestroyEntity(process);
+        _newEntities.Clear();
+        _deletedEntities.Clear();
+    }
+
     public void BeginFrame()
     {
         foreach (Entity entity in _deletedEntities)

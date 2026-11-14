@@ -23,7 +23,7 @@ internal abstract class AudioDevice(in AudioParameters audioParameters) : IAsync
     {
         return OperatingSystem.IsWindows()
             ? AudioBackend.XAudio2
-            : AudioBackend.Null;
+            : AudioBackend.OpenAL;
     }
 
         public static bool IsBackendAvailable(AudioBackend backend)
@@ -39,6 +39,7 @@ internal abstract class AudioDevice(in AudioParameters audioParameters) : IAsync
     public static AudioDevice Create(AudioBackend backend, in AudioParameters audioParameters)
         => backend switch
         {
+            AudioBackend.OpenAL => new OpenALAudioDevice(audioParameters),
             AudioBackend.Null => new NullAudioDevice(audioParameters),
             AudioBackend.XAudio2 => new XAudio2AudioDevice(audioParameters),
             _ => throw new NotImplementedException($"Backend '{backend}' is not implemented")

@@ -37,7 +37,7 @@ internal sealed class ShaderLibrary(GraphicsDevice graphicsDevice) : IDisposable
         using (var reader = new BinaryReader(stream))
         {
             byte[] bytes = reader.ReadBytes((int)stream.Length);
-            return factory.CreateShader(new ShaderDescription(stage, bytes, entryPoint));
+            return factory.CreateShader(new ShaderDescription(stage, bytes, factory.BackendType == GraphicsBackend.Metal ? "main0" : entryPoint));
         }
     }
 
@@ -45,11 +45,11 @@ internal sealed class ShaderLibrary(GraphicsDevice graphicsDevice) : IDisposable
     {
         return backend switch
         {
-            GraphicsBackend.Direct3D11 => ".hlsl.bytes",
+            GraphicsBackend.Direct3D11 => ".hlsl",
             GraphicsBackend.Vulkan => ".450.glsl.spv",
             GraphicsBackend.OpenGL => ".330.glsl",
             GraphicsBackend.OpenGLES => ".300.glsles",
-            GraphicsBackend.Metal => ".metallib",
+            GraphicsBackend.Metal => ".metal",
             _ => throw ThrowHelper.UnexpectedValueOf<GraphicsBackend>()
         };
     }

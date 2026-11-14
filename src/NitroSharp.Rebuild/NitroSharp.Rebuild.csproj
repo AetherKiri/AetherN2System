@@ -46,6 +46,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="../../aether_runtime/shaders/*"><LogicalName>NitroSharp.Graphics.Shaders.%(FileName)%(Extension)</LogicalName></EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
     <AdditionalFiles Include="Graphics/Shaders/**" />
   </ItemGroup>
 

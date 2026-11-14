@@ -63,7 +63,7 @@ internal sealed class FilePathResolver
 
     public FilePathResolver(string rootDirectory, string searchPattern)
     {
-        RootDirectory = new ResolvedPath(NormalizePath(rootDirectory));
+        RootDirectory = new ResolvedPath(NormalizePath(Path.GetFullPath(rootDirectory)));
         _canonicalPaths = new Dictionary<string, string>();
         foreach (string filePath in Directory
                      .EnumerateFiles(rootDirectory, searchPattern, SearchOption.AllDirectories))
@@ -102,7 +102,6 @@ internal sealed class FilePathResolver
 
     public static string NormalizePath(string path)
     {
-        string canonicalPath = Path.GetFullPath(path);
-        return OperatingSystem.IsWindows() ? path.Replace('\\', '/') : canonicalPath;
+        return path.Replace('\\', '/');
     }
 }

@@ -86,6 +86,9 @@ public sealed record Config
             case "D3D":
                 return GraphicsBackend.Direct3D11;
 
+            case "METAL":
+                return GraphicsBackend.Metal;
+
             case "VULKAN":
                 return GraphicsBackend.Vulkan;
 

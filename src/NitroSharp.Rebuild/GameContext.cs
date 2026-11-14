@@ -22,6 +22,7 @@ using Veldrid;
 using ZeroLog;
 
 [assembly: InternalsVisibleTo("NitroSharp.Tests")]
+[assembly: InternalsVisibleTo("aether_n2system")]
 
 namespace NitroSharp;
 
@@ -31,7 +32,7 @@ internal readonly record struct FrameStamp(long FrameId, long StopwatchTicks)
     public bool IsValid => FrameId >= 0 && StopwatchTicks >= 0;
 }
 
-internal sealed class GameContext
+internal sealed class GameContext : IDisposable
 {
     public required GameWindow Window { get; init; }
     internal required GameProfile Profile { get; init; }
@@ -63,8 +64,8 @@ internal sealed class GameContext
         while (!ShutdownSignal.IsCancellationRequested && !closeRequested)
         {
             long currentFrameTicks = Clock.ElapsedTicks;
-            float deltaMilliseconds = (float)(currentFrameTicks - prevFrameTicks)
-                / Stopwatch.Frequency * 1000.0f;
+            float deltaMilliseconds =
+                (float)(currentFrameTicks - prevFrameTicks) / Stopwatch.Frequency * 1000.0f;
             prevFrameTicks = currentFrameTicks;
 
             try
@@ -73,8 +74,44 @@ internal sealed class GameContext
                 FrameStamp = new FrameStamp(frameId++, Clock.ElapsedTicks);
                 Tick();
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) { }
+        }
+    }
+
+    private long _hostFrame;
+    private long _hostTicks;
+
+    internal void Step(float milliseconds)
+    {
+        DeltaTime = milliseconds;
+        _hostTicks += (long)(milliseconds / 1000.0 * Stopwatch.Frequency);
+        FrameStamp = new FrameStamp(_hostFrame++, _hostTicks);
+        Tick();
+    }
+
+    public void Dispose()
+    {
+        var failures = new List<Exception>();
+        Release(() => ShutdownSignal.Cancel());
+        Release(World.DisposeAll);
+        Release(InputContext.Dispose);
+        Release(() => AudioContext.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        Release(Content.Dispose);
+        Release(RenderContext.Dispose);
+        Release(GlyphRasterizer.Dispose);
+        Release(ShutdownSignal.Dispose);
+        if (failures.Count > 0)
+            throw new AggregateException("N2 instance cleanup failed.", failures);
+
+        void Release(Action release)
+        {
+            try
             {
+                release();
+            }
+            catch (Exception exception)
+            {
+                failures.Add(exception);
             }
         }
     }
@@ -95,66 +132,105 @@ internal sealed class GameContext
         RenderContext.Present();
     }
 
-    public static async Task<GameContext> Create(GameWindow window, Config config, GameProfile profile)
+    public static async Task<GameContext> Create(
+        GameWindow window,
+        Config config,
+        GameProfile profile
+    )
     {
         Log log = LogManager.GetLogger("root");
         log.Info("**** Start apprication ****");
         log.Info(
             $"""
-             Game: {profile.ProductDisplayName}
-             Profile: {profile.Name}
-             """
-        );
-
-        var initAudio = Task.Run(() => InitAudio(config));
-        var loadFonts = Task.Run(async () => await LoadFonts(profile));
-        var startVM = Task.Run(() => LoadStartupScript(profile, log));
-
-        (GraphicsDevice gd, Swapchain swapchain) = InitGraphics(window, config);
-        ContentManager contentMgr = CreateContentManager(gd, profile);
-        (GlyphRasterizer glyphRasterizer, FontSettings fontSettings) = await loadFonts;
-
-        var inputContext = new InputContext(window);
-        var renderContext = new RenderContext(
-            window,
-            config,
-            profile,
-            gd,
-            swapchain,
-            contentMgr,
-            glyphRasterizer,
-            null!
-        );
-
-        AudioContext audioContext = await initAudio;
-        (NsScriptVM vm, NsScriptThreadState mainThreadState) = await startVM;
-
-        log.Info(
-            $"""
-            Init successful.
-            Graphics backend: {gd.BackendType.ToString()}
-            Audio backend: {audioContext.Device.Backend.ToString()}
+            Game: {profile.ProductDisplayName}
+            Profile: {profile.Name}
             """
         );
 
-        (Process process, Thread thread) = CreateProcess(mainThreadState, profile.SysScripts.Startup, fontSettings);
-        var world = new World(process, thread);
-        var ctx =  new GameContext
+        GraphicsDevice? gd = null;
+        Swapchain? swapchain = null;
+        ContentManager? content = null;
+        GlyphRasterizer? glyphs = null;
+        InputContext? input = null;
+        RenderContext? render = null;
+        AudioContext? audio = null;
+        try
         {
-            Window = window,
-            AudioContext = audioContext,
-            Content = contentMgr,
-            GlyphRasterizer = glyphRasterizer,
-            Profile = profile,
-            RenderContext = renderContext,
-            InputContext = inputContext,
-            VM = vm,
-            World = world,
-            RootLog = log
-        };
-        ctx.Builtins = new Builtins(ctx);
-        return ctx;
+            // Create resources in ownership order so failed initialization can unwind.
+            (glyphs, FontSettings fontSettings) = await LoadFonts(profile);
+            (NsScriptVM vm, NsScriptThreadState state) = LoadStartupScript(profile, log);
+            audio = InitAudio(config);
+            (gd, swapchain) = InitGraphics(window, config);
+            content = CreateContentManager(gd, profile);
+            input = new InputContext(window);
+            render = new RenderContext(
+                window,
+                config,
+                profile,
+                gd,
+                swapchain,
+                content,
+                glyphs,
+                vm.SystemVariables
+            );
+            (Process process, Thread thread) = CreateProcess(
+                state,
+                profile.SysScripts.Startup,
+                fontSettings
+            );
+            var context = new GameContext
+            {
+                Window = window,
+                AudioContext = audio,
+                Content = content,
+                GlyphRasterizer = glyphs,
+                Profile = profile,
+                RenderContext = render,
+                InputContext = input,
+                VM = vm,
+                World = new World(process, thread),
+                RootLog = log,
+            };
+            context.Builtins = new Builtins(context);
+            log.Info(
+                $"Init successful. Graphics backend: {gd.BackendType}; audio backend: {audio.Device.Backend}."
+            );
+            return context;
+        }
+        catch
+        {
+            IgnoreFailure(() => input?.Dispose());
+            IgnoreFailure(() => content?.Dispose());
+            if (render is not null)
+                IgnoreFailure(render.Dispose);
+            else
+            {
+                IgnoreFailure(() => swapchain?.Dispose());
+                IgnoreFailure(() => gd?.Dispose());
+            }
+            IgnoreFailure(() => glyphs?.Dispose());
+            if (audio is not null)
+            {
+                try
+                {
+                    await audio.DisposeAsync();
+                }
+                catch { }
+            }
+            throw;
+        }
     }
+
+    private static void IgnoreFailure(Action cleanup)
+    {
+        try
+        {
+            cleanup();
+        }
+        catch { }
+    }
+
+    internal static string HostAssetsDirectory { get; set; } = AppContext.BaseDirectory;
 
     private static async Task<(GlyphRasterizer, FontSettings)> LoadFonts(GameProfile gameProfile)
     {
@@ -167,7 +243,7 @@ internal sealed class GameContext
             DefaultFontSize = gameProfile.FontSize,
             DefaultTextColor = RgbaFloat.White.ToVector4(),
             DefaultOutlineColor = RgbaFloat.Black.ToVector4(),
-            RubyFontSizeMultiplier = 0.4f
+            RubyFontSizeMultiplier = 0.4f,
         };
 
         if (OperatingSystem.IsWindows())
@@ -176,9 +252,11 @@ internal sealed class GameContext
             await glyphRasterizer.AddFontAsync($@"{winDir}\Fonts\msgothic.ttc");
         }
 
-        if (Directory.Exists("Fonts"))
+        if (Directory.Exists(Path.Combine(HostAssetsDirectory, "Fonts")))
         {
-            await glyphRasterizer.AddFontsAsync(Directory.EnumerateFiles("Fonts"));
+            await glyphRasterizer.AddFontsAsync(
+                Directory.EnumerateFiles(Path.Combine(HostAssetsDirectory, "Fonts"))
+            );
         }
 
         return (glyphRasterizer, defaultFontSettings);
@@ -188,7 +266,10 @@ internal sealed class GameContext
     {
         var audioParameters = AudioParameters.Default;
         AudioBackend backend = AudioDevice.GetPlatformDefaultBackend();
-        if (config.PreferredAudioBackend is { } preferredBackend && AudioDevice.IsBackendAvailable(preferredBackend))
+        if (
+            config.PreferredAudioBackend is { } preferredBackend
+            && AudioDevice.IsBackendAvailable(preferredBackend)
+        )
         {
             backend = preferredBackend;
         }
@@ -197,14 +278,35 @@ internal sealed class GameContext
         return new AudioContext(audioDevice);
     }
 
-    private static (GraphicsDevice device, Swapchain swapchain) InitGraphics(GameWindow window, Config configuration)
+    private static (GraphicsDevice device, Swapchain? swapchain) InitGraphics(
+        GameWindow window,
+        Config configuration
+    )
     {
-        var options = new GraphicsDeviceOptions(debug: false, swapchainDepthFormat: null, configuration.EnableVSync);
+        var options = new GraphicsDeviceOptions(
+            debug: false,
+            swapchainDepthFormat: null,
+            configuration.EnableVSync
+        );
         options.PreferStandardClipSpaceYDirection = true;
+        options.ResourceBindingModel = ResourceBindingModel.Improved;
 #if DEBUG
         options.Debug = true;
 #endif
         GraphicsBackend backend = configuration.GraphicsBackend;
+        if (window is HostedWindow)
+        {
+            GraphicsDevice offscreenDevice = backend switch
+            {
+                GraphicsBackend.Metal => GraphicsDevice.CreateMetal(options),
+                GraphicsBackend.Direct3D11 => GraphicsDevice.CreateD3D11(options),
+                GraphicsBackend.Vulkan => GraphicsDevice.CreateVulkan(options),
+                _ => throw new PlatformNotSupportedException(
+                    "Embedded graphics requires Metal, D3D11 or Vulkan."
+                ),
+            };
+            return (offscreenDevice, null);
+        }
         ScreenSizeU renderResolution = window.Size;
         var swapchainDesc = new SwapchainDescription(
             window.SwapchainSource,
@@ -217,9 +319,10 @@ internal sealed class GameContext
         if (backend is GraphicsBackend.OpenGL or GraphicsBackend.OpenGLES)
         {
             var wnd = (Sdl3Window)window;
-            GraphicsDevice glDevice = backend == GraphicsBackend.OpenGL
-                ? VeldridStartupGL.CreateDefaultOpenGLGraphicsDevice(options, wnd, backend)
-                : GraphicsDevice.CreateOpenGLES(options, swapchainDesc);
+            GraphicsDevice glDevice =
+                backend == GraphicsBackend.OpenGL
+                    ? VeldridStartupGL.CreateDefaultOpenGLGraphicsDevice(options, wnd, backend)
+                    : GraphicsDevice.CreateOpenGLES(options, swapchainDesc);
             return (glDevice, glDevice.MainSwapchain.NotNull());
         }
 
@@ -227,26 +330,40 @@ internal sealed class GameContext
         {
             GraphicsBackend.Direct3D11 => GraphicsDevice.CreateD3D11(options),
             GraphicsBackend.Vulkan => GraphicsDevice.CreateVulkan(options),
-            _ => throw new Exception($"Backend {backend} is not currently supported.")
+            _ => throw new Exception($"Backend {backend} is not currently supported."),
         };
 
         Swapchain swapchain = device.ResourceFactory.CreateSwapchain(in swapchainDesc);
         return (device, swapchain);
     }
 
-    private static ContentManager CreateContentManager(GraphicsDevice device, GameProfile gameProfile)
+    private static ContentManager CreateContentManager(
+        GraphicsDevice device,
+        GameProfile gameProfile
+    )
     {
         TextureLoader textureLoader = OperatingSystem.IsWindows()
             ? new WicTextureLoader(device)
-            : new FFmpegTextureLoader(device);
+            : new ImageSharpTextureLoader(device);
 
-        var content = new ContentManager(gameProfile.ContentRoot, textureLoader, gameProfile.MountPoints);
+        var content = new ContentManager(
+            gameProfile.ContentRoot,
+            textureLoader,
+            gameProfile.MountPoints
+        );
         return content;
     }
 
-    private static (NsScriptVM vm, NsScriptThreadState mainThread) LoadStartupScript(GameProfile gameProfile, Log log)
+    private static (NsScriptVM vm, NsScriptThreadState mainThread) LoadStartupScript(
+        GameProfile gameProfile,
+        Log log
+    )
     {
-        DirectoryInfo tempDir = Directory.CreateTempSubdirectory("NitroSharp");
+        DirectoryInfo tempDir = gameProfile.WritableDirectory is { } writable
+            ? Directory.CreateDirectory(
+                Path.Combine(writable, "bytecode-" + Guid.NewGuid().ToString("N"))
+            )
+            : Directory.CreateTempSubdirectory("NitroSharp");
 
         const string globalsFileName = "_globals";
 
@@ -264,8 +381,13 @@ internal sealed class GameContext
             else
             {
                 log.Info("Bytecode cache is not up-to-date. Recompiling the scripts...");
-                foreach (string file in Directory
-                    .EnumerateFiles(bytecodeCacheDir, "*.nsx", SearchOption.AllDirectories))
+                foreach (
+                    string file in Directory.EnumerateFiles(
+                        bytecodeCacheDir,
+                        "*.nsx",
+                        SearchOption.AllDirectories
+                    )
+                )
                 {
                     File.Delete(file);
                 }
@@ -274,9 +396,7 @@ internal sealed class GameContext
             Encoding? sourceEncoding = null;
             if (!gameProfile.DetectEncoding)
             {
-                sourceEncoding = gameProfile.UseUtf8
-                    ? Encoding.UTF8
-                    : SourceText.DefaultEncoding;
+                sourceEncoding = gameProfile.UseUtf8 ? Encoding.UTF8 : SourceText.DefaultEncoding;
             }
 
             SystemScripts sysScripts = gameProfile.SysScripts;
@@ -286,11 +406,13 @@ internal sealed class GameContext
                 sysScripts.Backlog,
                 sysScripts.Menu,
                 sysScripts.Load,
-                sysScripts.Save
+                sysScripts.Save,
             ];
 
             var nssFolderInfo = new DirectoryInfo(nssFolder);
-            string[] existingModules = moduleNames.Where(x => nssFolderInfo.EnumerateFiles(x).Any()).ToArray();
+            string[] existingModules = moduleNames
+                .Where(x => nssFolderInfo.EnumerateFiles(x).Any())
+                .ToArray();
             IEnumerable<string> nonExistingModules = moduleNames.Except(existingModules);
 
             foreach (string nonExistingModule in nonExistingModules)
@@ -326,11 +448,17 @@ internal sealed class GameContext
     private static (Process process, Thread thread) CreateProcess(
         in NsScriptThreadState threadState,
         string modulePath,
-        FontSettings fontSettings)
+        FontSettings fontSettings
+    )
     {
         string moduleName = Path.GetFileNameWithoutExtension(modulePath);
         var process = new Process(EntityName.Parse(moduleName), parent: null, fontSettings);
-        var thread = new Thread(EntityName.Parse("main"), parent: process, threadState, isMain: true);
+        var thread = new Thread(
+            EntityName.Parse("main"),
+            parent: process,
+            threadState,
+            isMain: true
+        );
         return (process, thread);
     }
 }

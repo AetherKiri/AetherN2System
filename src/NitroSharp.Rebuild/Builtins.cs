@@ -48,6 +48,8 @@ internal sealed class Builtins : BuiltInFunctions
         return default!;
     }
 
+    public override void Exit() => _ctx.ShutdownSignal.Cancel();
+
     public override int GetPlatformId() => 100;
 
     public override void CreateEntity(in EntityPath entityPath)

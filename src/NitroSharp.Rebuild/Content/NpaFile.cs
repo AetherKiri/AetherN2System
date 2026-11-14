@@ -80,6 +80,8 @@ internal sealed class NpaFile : ArchiveFile
         return new NpaFile(mmFile, dataStart, entries);
     }
 
+    internal IEnumerable<string> FileNames => _entries.Keys;
+
     public override Stream OpenStream(string path)
     {
         if (!Contains(path))

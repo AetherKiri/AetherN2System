@@ -30,7 +30,7 @@ namespace NitroSharp.Graphics
         private readonly CommandList _drawCommands;
         private readonly CommandList _secondaryCommandList;
 
-        private readonly Swapchain _mainSwapchain;
+        private readonly Swapchain? _mainSwapchain;
         private readonly RenderTarget _swapchainTarget;
         private readonly DrawBatch _offscreenBatch;
 
@@ -41,7 +41,7 @@ namespace NitroSharp.Graphics
             Config config,
             GameProfile gameProfile,
             GraphicsDevice graphicsDevice,
-            Swapchain swapchain,
+            Swapchain? swapchain,
             ContentManager contentManager,
             GlyphRasterizer glyphRasterizer,
             SystemVariableLookup systemVariables)
@@ -57,7 +57,7 @@ namespace NitroSharp.Graphics
             _mainSwapchain = swapchain;
             _shaderLibrary = new ShaderLibrary(graphicsDevice);
 
-            _swapchainTarget = RenderTarget.Swapchain(graphicsDevice, swapchain.Framebuffer);
+            _swapchainTarget = swapchain is null ? new RenderTarget(graphicsDevice, window.Size) : RenderTarget.Swapchain(graphicsDevice, swapchain.Framebuffer);
             OffscreenTarget = new RenderTarget(graphicsDevice, _swapchainTarget.Size);
             OffscreenTexturePool = new ResourcePool<Texture>(CreateOffscreenTexture, initialSize: 4);
 
@@ -345,9 +345,34 @@ namespace NitroSharp.Graphics
             GraphicsDevice.SubmitCommands(_drawCommands);
         }
 
+        public unsafe void CopyRgba(Span<byte> destination)
+        {
+            using CommandList commands = ResourceFactory.CreateCommandList();
+            commands.Begin();
+            Texture staging = _swapchainTarget.ReadBack(commands, ResourceFactory);
+            commands.End();
+            GraphicsDevice.SubmitCommands(commands);
+            GraphicsDevice.WaitForIdle();
+            MappedResource map = GraphicsDevice.Map(staging, MapMode.Read);
+            try
+            {
+                int width = (int)RenderResolution.Width;
+                for (int y = 0; y < RenderResolution.Height; y++)
+                {
+                    var source = new ReadOnlySpan<byte>((byte*)map.Data + y * map.RowPitch, width * 4);
+                    Span<byte> target = destination.Slice(y * width * 4, width * 4);
+                    source.CopyTo(target);
+                    if (staging.Format == PixelFormat.B8_G8_R8_A8_UNorm)
+                        for (int x = 0; x < width * 4; x += 4)
+                            (target[x], target[x + 2]) = (target[x + 2], target[x]);
+                }
+            }
+            finally { GraphicsDevice.Unmap(staging); }
+        }
+
         public void Present()
         {
-            GraphicsDevice.SwapBuffers(_mainSwapchain);
+            if (_mainSwapchain is not null) GraphicsDevice.SwapBuffers(_mainSwapchain);
         }
 
         public Sampler GetSampler(FilterMode filterMode)
@@ -402,13 +427,16 @@ namespace NitroSharp.Graphics
             Text.Dispose();
             Quads.Dispose();
             Cubes.Dispose();
+            QuadsUV3.Dispose();
+            PerspectiveViewProjection.Dispose();
+            CustomSampler.Dispose();
             _textureCache.Dispose();
             ResourceSetCache.Dispose();
             _swapchainTarget.Dispose();
             OffscreenTarget.Dispose();
             OffscreenTexturePool.Dispose();
             _shaderLibrary.Dispose();
-            _mainSwapchain.Dispose();
+            _mainSwapchain?.Dispose();
             GraphicsDevice.Dispose();
         }
     }

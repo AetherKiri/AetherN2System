@@ -17,6 +17,8 @@ public static class Game
         }
     }
 
+    internal static void InitializeHostLogging() => InitLogManager();
+
     private static IDisposable InitLogManager()
     {
         const string prefixPattern = @"[%{localTime:hh\:mm\:ss} %{level}] %logger: ";

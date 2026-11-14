@@ -13,18 +13,18 @@
     <DefineConstants>$(DefineConstants);PORTABLE</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" '$(NativeRid)' == 'win-x64' Or ('$(NativeRid)' == '' And '$(Portable)' != 'true' And '$([MSBuild]::IsOsPlatform(`WINDOWS`))' == 'true') ">
+  <PropertyGroup Condition=" '$(NativeRid)' == 'win-x64' Or '$(NativeRid)' == 'win-arm64' Or ('$(NativeRid)' == '' And '$(Portable)' != 'true' And '$([MSBuild]::IsOsPlatform(`WINDOWS`))' == 'true') ">
     <IsWindows>true</IsWindows>
     <DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" '$(NativeRid)' == 'linux-x64' Or ('$(NativeRid)' == '' And '$(Portable)' != 'true' And '$([MSBuild]::IsOsPlatform(`LINUX`))' == 'true') ">
+  <PropertyGroup Condition=" '$(NativeRid)' == 'linux-x64' Or '$(NativeRid)' == 'linux-arm64' Or ('$(NativeRid)' == '' And '$(Portable)' != 'true' And '$([MSBuild]::IsOsPlatform(`LINUX`))' == 'true') ">
     <IsLinux>true</IsLinux>
     <IsUnix>true</IsUnix>
     <DefineConstants>$(DefineConstants);LINUX;UNIX</DefineConstants>
   </PropertyGroup>
 
-  <PropertyGroup Condition=" '$(NativeRid)' == 'osx-x64'  Or ('$(NativeRid)' == '' And '$(Portable)' != 'true' And '$([MSBuild]::IsOsPlatform(`OSX`))' == 'true') ">
+  <PropertyGroup Condition=" '$(NativeRid)' == 'osx-x64' Or '$(NativeRid)' == 'osx-arm64' Or ('$(NativeRid)' == '' And '$(Portable)' != 'true' And '$([MSBuild]::IsOsPlatform(`OSX`))' == 'true') ">
     <IsMacOS>true</IsMacOS>
     <IsUnix>true</IsUnix>
     <DefineConstants>$(DefineConstants);MACOS;UNIX</DefineConstants>

@@ -304,6 +304,7 @@ internal sealed class DrawBatch(RenderContext context) : IDisposable
 
         CommandList cl = _commandList;
         cl.SetFramebuffer(Target.Framebuffer);
+        cl.SetFullViewports();
         cl.SetPipeline(lastDraw.Pipeline);
         if (lastDraw.ScissorRect is { } sr)
         {

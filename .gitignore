@@ -231,3 +231,5 @@ _Pvt_Extensions
 
 .idea/
 .vscode/
+# NativeAOT development output
+aether_runtime/build/

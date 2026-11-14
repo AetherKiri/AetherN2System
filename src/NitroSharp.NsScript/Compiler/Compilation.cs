@@ -55,7 +55,7 @@ public class Compilation
         string outputDirectory,
         string globalsFileName)
     {
-        FileStream globalsStream = File.Create(Path.Combine(outputDirectory, globalsFileName));
+        using FileStream globalsStream = File.Create(Path.Combine(outputDirectory, globalsFileName));
         return Emit(roots, createOutputStream, globalsStream);
 
         Stream createOutputStream(NsxModuleBuilder nsxBuilder)

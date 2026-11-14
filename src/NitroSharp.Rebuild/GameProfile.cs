@@ -28,11 +28,12 @@ public sealed class GameProfile
     public required int PlatformId { get; init; }
 
     public required MountPoint[]? MountPoints { get; init; }
+    internal string? WritableDirectory { get; set; }
 
     public static GameProfile Read(Stream stream)
     {
         JsonElement root = JsonDocument.Parse(stream).RootElement;
-        string? profileName = root.GetProperty("activeProfile").GetString();
+        string? profileName = root.TryGetProperty("activeProfile", out JsonElement active) ? active.GetString() : null;
 
         JsonElement? activeProfile = null;
         if (profileName is not null)
@@ -154,7 +155,7 @@ public struct IconPathEnumerable(IconPathPattern pattern)
 
     public bool MoveNext()
     {
-        if (_index == pattern.IconCount) { return false; }
+        if (_index > pattern.IconCount) { return false; }
 
         Current = StringFormatter.PrintF(pattern.FormatString, _index);
         _index++;

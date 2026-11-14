@@ -151,6 +151,8 @@ public sealed class NsScriptVM
         }
     }
 
+    public int InstructionBudget { get; set; } = 100_000;
+
     private TickResult TickCore(ref NsScriptThreadState thread, BuiltInFunctions builtins)
     {
         if (thread.CallFrameStack.Count == 0)
@@ -164,9 +166,11 @@ public sealed class NsScriptVM
         builtins.CurrentModule = thisModule;
         var program = new BytecodeStream(thisModule.Code, frame.ProgramCounter);
         ref ValueStack<ConstantValue> evalStack = ref thread.EvalStack;
+        int instructions = 0;
         while (true)
         {
             frame.ProgramCounter = program.Position;
+            if (++instructions > InstructionBudget) return TickResult.Yield;
             Opcode opcode = program.NextOpcode();
             if (opcode is >= Opcode.LoadImm0 and <= Opcode.LoadFlag)
             {
