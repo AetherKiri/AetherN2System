@@ -419,7 +419,7 @@ internal sealed class Builtins : BuiltInFunctions
         waitTimeout = AdjustDuration(waitTimeout);
         foreach (Entity entity in Query(query))
         {
-            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: false))
+            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: true))
             {
                 node.Move(_ctx.RenderContext, dstX, dstY, duration, easeFunction);
             }
@@ -434,7 +434,7 @@ internal sealed class Builtins : BuiltInFunctions
         waitTimeout = AdjustDuration(waitTimeout);
         foreach (Entity entity in Query(query))
         {
-            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: false))
+            foreach (Entity node in entity.DescendantsAndSelf(selfFirst: true))
             {
                 node.Fade(dstOpacity, duration, easeFunction);
             }
