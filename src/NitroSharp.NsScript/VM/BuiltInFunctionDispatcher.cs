@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Numerics;
 using NitroSharp.NsScript.Compiler;
 using NitroSharp.NsScript.Primitives;
@@ -1018,7 +1019,7 @@ internal sealed class BuiltInFunctionDispatcher
 
         _impl.CreateRectangle(
             args.TakeEntityPath(),
-            priority: args.TakeInt(),
+            priority: args.TakePriority(),
             x: args.TakeCoordinate(),
             y: args.TakeCoordinate(),
             width: args.TakeUInt(),
@@ -1303,6 +1304,22 @@ internal sealed class BuiltInFunctionDispatcher
                 BuiltInType.Null => 0,
                 _ => UnexpectedType<int>(arg.Type)
             };
+        }
+
+        public int TakePriority()
+        {
+            if (_pos >= _args.Length || !_args[_pos].IsString) return TakeInt();
+            ConstantValue arg = Take();
+            ReadOnlySpan<char> text = arg.AsString().AsSpan().TrimStart();
+            int digitsStart = text.Length > 0 && text[0] is '+' or '-' ? 1 : 0;
+            int end = digitsStart;
+            while (end < text.Length && text[end] is >= '0' and <= '9') end++;
+            // Native CreateColor reads priority with atol, including a shipped 20000i token.
+            // Keep this conversion local and reject missing digits or overflow.
+            return end > digitsStart && int.TryParse(text[..end], NumberStyles.AllowLeadingSign,
+                CultureInfo.InvariantCulture, out int value)
+                ? value
+                : UnexpectedType<int>(arg.Type);
         }
 
         public bool NextIsString(string text)

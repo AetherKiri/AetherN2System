@@ -81,7 +81,9 @@ with tempfile.TemporaryDirectory(prefix='aether-mask-transition-') as cache:
             advance()
             strongest = [sample(x, 60)[0] for x in (40, 41, 42, 43)]
             assert max(strongest) - min(strongest) < 12, strongest
-            assert all(70 < value < 180 for value in strongest), strongest
+            # Every native box-blur pass attenuates both color and alpha.
+            # The strongest 32-pass shade is visibly darker than MEDIUM.
+            assert all(50 < value < 100 for value in strongest), strongest
             advance()
             assert [sample(x, 60)[0] for x in (40, 41, 42, 43)] == strongest, 'NORMAL must retain the active shade'
             advance()

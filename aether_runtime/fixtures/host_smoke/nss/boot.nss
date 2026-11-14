@@ -1,6 +1,6 @@
 chapter main
 {
-    CreateColor("screen", 1, 0, 0, 320, 180, "BLUE");
+    CreateColor("screen", 20000i, 0, 0, 320, 180, "BLUE");
     WaitKey();
     Delete("screen");
     CreateColor("screen", 1, 0, 0, 320, 180, "RED");

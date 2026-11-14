@@ -1,5 +1,7 @@
 chapter main
 {
+    #SYSTEM_text_speed = 0;
+    $SYSTEM_text_interval = 0;
     CreateColor("background", 0, 0, 0, 640, 360, "BLACK");
     CreateText("title", 10, 20, 10, 580, 90, "<FONT incolor=GREEN>Aether N2 text</FONT> <RUBY text=むらまさ>村正</RUBY><BR>Inline font, ruby and line break");
     if (ImageHorizon("title") > 20 && ImageHorizon("title") <= 580 && ImageVertical("title") > 20 && ImageVertical("title") <= 90) {

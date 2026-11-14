@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Exercise the real NativeAOT C ABI against original manual tests and a plain NPA."""
-import ctypes as C, pathlib, sys, tempfile, struct, json, shutil, time
+import ctypes as C, pathlib, sys, tempfile, struct, json, shutil, time, zlib
 root=pathlib.Path(__file__).resolve().parent.parent
 lib=C.CDLL(str(pathlib.Path(sys.argv[1] if len(sys.argv)>1 else root/'aether_runtime/build/osx-arm64/aether_n2system.dylib').resolve()))
 class Frame(C.Structure): _fields_=[('pixels',C.POINTER(C.c_uint8)),('width',C.c_uint32),('height',C.c_uint32),('stride',C.c_uint32),('sequence',C.c_uint64)]
@@ -12,12 +12,13 @@ lib.aether_n2system_event.argtypes=[C.c_void_p,C.c_uint32,C.c_int32,C.c_float,C.
 lib.aether_n2system_pause.argtypes=[C.c_void_p,C.c_int]
 lib.aether_n2system_status.argtypes=[C.c_void_p]
 lib.aether_n2system_destroy.argtypes=[C.c_void_p]
-def plain_npa(destination,files):
+def plain_npa(destination,files,compressed=False):
     index=bytearray();payload=bytearray()
     for i,(name,data) in enumerate(files.items()):
         encoded=bytes((value-((0xfc*j-i)&255))&255 for j,value in enumerate(name.encode('shift_jis')))
-        index+=struct.pack('<I',len(encoded))+encoded+struct.pack('<BIIII',2,0,len(payload),len(data),len(data));payload+=data
-    header=b'NPA\x01\0\0\0'+struct.pack('<IIBBIIIQI',0,0,0,0,len(files),0,len(files),0,len(index))
+        stored=zlib.compress(data) if compressed else data
+        index+=struct.pack('<I',len(encoded))+encoded+struct.pack('<BIIII',2,0,len(payload),len(stored),len(data));payload+=stored
+    header=b'NPA\x01\0\0\0'+struct.pack('<IIBBIIIQI',0,0,int(compressed),0,len(files),0,len(files),0,len(index))
     destination.write_bytes(header+index+payload)
 with tempfile.TemporaryDirectory() as temporary:
     temporary=pathlib.Path(temporary);packed=temporary/'packed';packed.mkdir()
@@ -25,7 +26,9 @@ with tempfile.TemporaryDirectory() as temporary:
     (packed/'AETHER-N2SYSTEM.JSON').write_bytes((fixture/'aether-n2system.json').read_bytes())
     shutil.copytree(fixture/'assets', packed/'assets')
     plain_npa(packed/'NSS.NPA',{'boot.nss':(fixture/'nss/boot.nss').read_bytes()})
-    for cycle,game in enumerate((root/'manual_tests',fixture,packed,fixture)):
+    compressed=temporary/'compressed';shutil.copytree(packed,compressed)
+    plain_npa(compressed/'NSS.NPA',{'boot.nss':(fixture/'nss/boot.nss').read_bytes()},compressed=True)
+    for cycle,game in enumerate((root/'manual_tests',fixture,packed,fixture,compressed)):
         h=C.c_void_p()
         def check(value):
             if value: raise RuntimeError((lib.aether_n2system_last_error(h) or b'unknown host error').decode())
@@ -52,8 +55,9 @@ with tempfile.TemporaryDirectory() as temporary:
         else: advance()
         lib.aether_n2system_destroy(h);lib.aether_n2system_destroy(h)
         print(f'cycle {cycle}: {game.name}: RGBA, pause/resume, input, destroy passed')
-    # A compressed NPA must return a diagnostic across the ABI and leave no handle.
+    # Declaring uncompressed bytes as zlib must report invalid data and leave no handle.
     compressed=bytearray((packed/'NSS.NPA').read_bytes());compressed[15]=1;(packed/'NSS.NPA').write_bytes(compressed)
     h=C.c_void_p();assert lib.aether_n2system_create(str(packed).encode(),str(temporary/'bad').encode(),320,180,C.byref(h))==-1
-    assert not h.value and b'Compression is not supported' in lib.aether_n2system_last_error(None)
-    print('compressed NPA diagnostic passed')
+    error=lib.aether_n2system_last_error(None) or b''
+    assert not h.value and b'compressed' in error.lower(), error
+    print('compressed NPA playback and malformed payload diagnostic passed')
