@@ -1258,9 +1258,12 @@ internal sealed class BuiltInFunctionDispatcher
         public NsEntityAction TakeEntityAction()
         {
             ConstantValue val = TakeOpt(ConstantValue.Null);
-            return val.Type == BuiltInType.BuiltInConstant
-                ? EnumConversions.ToEntityAction(val.AsBuiltInConstant()!.Value)
-                : UnexpectedType<NsEntityAction>(val.Type);
+            if (val.Type == BuiltInType.BuiltInConstant)
+                return EnumConversions.ToEntityAction(val.AsBuiltInConstant()!.Value);
+            if (val.Type == BuiltInType.String &&
+                Enum.TryParse(val.AsString(), ignoreCase: true, out BuiltInConstant constant))
+                return EnumConversions.ToEntityAction(constant);
+            return UnexpectedType<NsEntityAction>(val.Type);
         }
 
         public NsOutlineOffset TakeOutlineOffset()
