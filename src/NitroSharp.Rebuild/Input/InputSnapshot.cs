@@ -11,13 +11,13 @@ public abstract class InputSnapshot
 
     private readonly bool[] _mouseState = new bool[13];
     private readonly bool[] _newMouseButtons = new bool[13];
-    private Vector2 _prevMousePosition;
 
     private readonly Dictionary<ulong, TouchPoint> _activeTouches = [];
 
     public Vector2 MousePosition { get; protected set; }
     public Vector2 WheelDelta { get; protected set; }
     public IReadOnlyCollection<TouchPoint> ActiveTouches => _activeTouches.Values;
+    public bool IsTouchDown { get; private set; }
 
     public abstract ReadOnlySpan<KeyEvent> KeyEvents { get; }
     public abstract ReadOnlySpan<MouseButtonEvent> MouseEvents { get; }
@@ -40,7 +40,7 @@ public abstract class InputSnapshot
     {
         _newKeys.Clear();
         _newMouseButtons.AsSpan().Clear();
-        _prevMousePosition = MousePosition;
+        IsTouchDown = false;
 
         foreach (KeyEvent evt in KeyEvents)
         {
@@ -54,14 +54,14 @@ public abstract class InputSnapshot
             else
             {
                 _keyboardState.Remove(evt.Physical);
-                _newKeys.Remove(evt.Physical);
             }
         }
 
         foreach (MouseButtonEvent evt in MouseEvents)
         {
             int index = (int)evt.MouseButton;
-            _newMouseButtons[index] = !_mouseState[index] & evt.Down;
+            // Preserve a press even when its release arrives in the same pump.
+            _newMouseButtons[index] |= !_mouseState[index] && evt.Down;
             _mouseState[index] = evt.Down;
         }
 
@@ -70,6 +70,8 @@ public abstract class InputSnapshot
             switch (evt.Kind)
             {
                 case TouchEventKind.Down:
+                    IsTouchDown = true;
+                    goto case TouchEventKind.Motion;
                 case TouchEventKind.Motion:
                     _activeTouches[evt.FingerId] = new TouchPoint(evt.Position, evt.Pressure);
                     MousePosition = evt.Position;

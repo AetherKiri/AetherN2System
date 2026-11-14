@@ -1,8 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Numerics;
 using NitroSharp.Common;
 using NitroSharp.Graphics;
+using NitroSharp.Input;
+using NitroSharp.Media;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.Primitives;
 using NitroSharp.NsScript.VM;
@@ -14,9 +18,18 @@ namespace NitroSharp;
 
 internal sealed class Builtins : BuiltInFunctions
 {
+    private static readonly string[] s_mouseStates = ["MouseUsual", "MouseClick", "MouseOver", "MouseLeave"];
+
     private readonly GameContext _ctx;
     private readonly World _world;
     private readonly Log _log;
+    private readonly Dictionary<Thread, ChoiceInputState> _choiceInputs = [];
+
+    private sealed class ChoiceInputState
+    {
+        public ChoiceEntity? Focused;
+        public readonly Dictionary<ChoiceEntity, long> LastSeen = [];
+    }
 
     public Builtins(GameContext gameContext)
     {
@@ -184,6 +197,199 @@ internal sealed class Builtins : BuiltInFunctions
         return 0;
     }
 
+    public override void CreateChoice(in EntityPath entityPath)
+    {
+        if (!ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
+            return;
+
+        var choice = _world.AddEntity(new ChoiceEntity(name, parent));
+        foreach (string mouseState in s_mouseStates)
+            _world.AddEntity(new MouseStateEntity(EntityName.Parse(mouseState), choice));
+    }
+
+    public override void SetNextFocus(in EntityQuery first, in EntityQuery second, NsFocusDirection focusDirection)
+    {
+        ChoiceEntity? destination = ResolveChoice(second);
+        if (destination is null) return;
+        foreach (Entity entity in Query(first))
+        {
+            ChoiceEntity? source = ChoiceEntity.FindOwner(entity);
+            if (source is null) continue;
+            source.SetNextFocus(focusDirection, destination);
+            if (source.IsClickable && (!_choiceInputs.TryGetValue(CurrentThread, out ChoiceInputState? input)
+                || input.Focused is null))
+            {
+                _choiceInputs.TryAdd(CurrentThread, input = new ChoiceInputState());
+                FocusChoice(input!, source);
+            }
+        }
+    }
+
+    public override void SelectEnd()
+    {
+        if (!_choiceInputs.TryGetValue(CurrentThread, out ChoiceInputState? input)) return;
+        input.Focused?.ShowState(MouseState.Normal);
+        input.Focused = null;
+    }
+
+    public override bool HandleInputEvents(in EntityQuery uiElementPath)
+    {
+        if (!_choiceInputs.TryGetValue(CurrentThread, out ChoiceInputState? input))
+            _choiceInputs.Add(CurrentThread, input = new ChoiceInputState());
+
+        long frame = _ctx.FrameStamp.FrameId;
+        foreach (Entity entity in Query(uiElementPath))
+        {
+            ChoiceEntity? choice = ChoiceEntity.FindOwner(entity);
+            if (choice is null || !choice.IsAttached || !choice.IsClickable
+                || choice.GetHitTarget() is not { } hitTarget) continue;
+
+            input.LastSeen[choice] = frame;
+            // Nested menus share a script thread. Reconcile focus with the choices
+            // being polled, instead of retaining a disabled or outer menu choice.
+            if (input.Focused is not { IsAttached: true, IsClickable: true } focused
+                || input.LastSeen.TryGetValue(focused, out long seen) && seen < frame - 1)
+                FocusChoice(input, choice);
+
+            bool hovered = HitTest(hitTarget, _ctx.InputContext.MousePosition);
+            bool pointerEntered = hovered && !choice.PointerInside;
+            choice.PointerInside = hovered;
+            if (hovered && (pointerEntered || _ctx.InputContext.PointerMoved))
+                FocusChoice(input, choice);
+
+            bool pointerPress = hovered && _ctx.InputContext.ChoicePointerPressed;
+            bool confirmPress = !_ctx.InputContext.ChoicePointerPressed
+                && ReferenceEquals(input.Focused, choice)
+                && _ctx.InputContext.WasActionTriggered(InputAction.Enter);
+            if ((pointerPress || confirmPress)
+                && _ctx.InputContext.ConsumeChoicePress(pointerPress))
+            {
+                FocusChoice(input, choice);
+                choice.ShowState(MouseState.Down);
+                return true;
+            }
+
+            if (ReferenceEquals(input.Focused, choice))
+            {
+                foreach ((InputAction action, NsFocusDirection direction) in s_focusDirections)
+                {
+                    if (_ctx.InputContext.WasActionTriggered(action)
+                        && choice.GetNextFocus(direction) is { } next)
+                    {
+                        _ctx.InputContext.Consume(action);
+                        FocusChoice(input, next);
+                        break;
+                    }
+                }
+            }
+            choice.ShowState(ReferenceEquals(input.Focused, choice) ? MouseState.Over : MouseState.Normal);
+        }
+        return false;
+    }
+
+    private static readonly (InputAction, NsFocusDirection)[] s_focusDirections =
+    [
+        (InputAction.Left, NsFocusDirection.Left),
+        (InputAction.Up, NsFocusDirection.Up),
+        (InputAction.Right, NsFocusDirection.Right),
+        (InputAction.Down, NsFocusDirection.Down)
+    ];
+
+    private ChoiceEntity? ResolveChoice(in EntityQuery query)
+    {
+        foreach (Entity entity in Query(query))
+            if (ChoiceEntity.FindOwner(entity) is { } choice) return choice;
+        return null;
+    }
+
+    private static void FocusChoice(ChoiceInputState input, ChoiceEntity choice)
+    {
+        if (ReferenceEquals(input.Focused, choice)) return;
+        input.Focused?.ShowState(MouseState.Normal);
+        input.Focused = choice;
+        choice.ShowState(MouseState.Over);
+    }
+
+    private bool HitTest(RenderItem target, Vector2 position)
+    {
+        if (!ContainsPoint(target, position)) return false;
+        // A hidden usual sprite still supplies geometry. Enclosing windows,
+        // rather than visual alpha, constrain which part can receive input.
+        for (Entity? parent = target.Parent; parent is not null; parent = parent.Parent)
+            if (parent is ConstraintBox constraint && !ContainsPoint(constraint, position)) return false;
+        return true;
+    }
+
+    private bool ContainsPoint(RenderItem target, Vector2 position)
+    {
+        DesignSize size = target.GetSize(_ctx.RenderContext);
+        Matrix4x4 matrix = _ctx.RenderContext.GetTransformMatrix(
+            target.Transform, size, useScaling: true, aligned: false);
+        if (!Matrix4x4.Invert(matrix, out Matrix4x4 inverse)) return false;
+        Vector3 local = Vector3.Transform(new Vector3(position, 0), inverse);
+        return local.X >= 0 && local.Y >= 0 && local.X < size.Width && local.Y < size.Height;
+    }
+
+    public override void LoadAudio(in EntityPath entityPath, NsAudioKind kind, string fileName)
+    {
+        if (!ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
+            return;
+
+        using (Stream? stream = OpenAudioStream(fileName))
+        {
+            if (stream is null)
+            {
+                _log.Warn($"Audio file could not be opened: '{fileName}'");
+                return;
+            }
+        }
+
+        _world.AddEntity(new AudioEntity(
+            name,
+            parent,
+            () => OpenAudioStream(fileName)
+                ?? throw new FileNotFoundException("Audio file could not be opened.", fileName),
+            _ctx.AudioContext,
+            kind
+        ));
+    }
+
+    private Stream? OpenAudioStream(string fileName)
+    {
+        Stream? stream = _ctx.Content.TryOpenStream(fileName);
+        if (stream is not null || Path.HasExtension(fileName))
+            return stream;
+
+        foreach (string extension in new[] { ".ogg", ".wav", ".mp3", ".flac", ".opus" })
+        {
+            stream = _ctx.Content.TryOpenStream(fileName + extension);
+            if (stream is not null)
+                return stream;
+        }
+        return null;
+    }
+
+    public override void ToggleLooping(in EntityQuery query, bool enable)
+    {
+        foreach (Entity entity in Query(query))
+            if (entity is AudioEntity audio)
+                audio.SetLooping(enable);
+    }
+
+    public override void SetLoopRegion(in EntityQuery query, TimeSpan loopStart, TimeSpan loopEnd)
+    {
+        foreach (Entity entity in Query(query))
+            if (entity is AudioEntity audio)
+                audio.SetLoopRegion(loopStart, loopEnd);
+    }
+
+    public override void SetVolume(in EntityQuery query, TimeSpan duration, NsRational volume)
+    {
+        foreach (Entity entity in Query(query))
+            if (entity is AudioEntity audio)
+                audio.SetVolume(volume.Rebase(1.0f), AdjustDuration(duration));
+    }
+
     public override void CreateThread(in EntityPath entityPath, string target, NsCoordinate x, NsCoordinate y)
     {
         if (ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
@@ -310,7 +516,8 @@ internal sealed class Builtins : BuiltInFunctions
     {
         foreach (Entity entity in Query(query))
         {
-            _world.DestroyEntity(entity);
+            if (!entity.IsLocked)
+                _world.DestroyEntity(entity);
         }
     }
 }

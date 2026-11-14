@@ -478,9 +478,15 @@ internal sealed class JsonObjectBuilder
 
     public void AddAutomaticMounts(string content)
     {
-        if (_root["dev.mounts"] is not null || Active?["dev.mounts"] is not null)
-            return;
-        var mounts = new System.Text.Json.Nodes.JsonArray();
+        var mounts = _root["dev.mounts"] as System.Text.Json.Nodes.JsonArray
+            ?? Active?["dev.mounts"] as System.Text.Json.Nodes.JsonArray
+            ?? new System.Text.Json.Nodes.JsonArray();
+        _root["dev.mounts"] = mounts;
+        var mountedArchives = mounts
+            .OfType<System.Text.Json.Nodes.JsonObject>()
+            .Select(mount => mount["archive"]?.GetValue<string>())
+            .Where(name => name is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (string path in Directory.EnumerateFiles(content)
             .Where(p => Path.GetExtension(p).Equals(".npa", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(p => Path.GetFileNameWithoutExtension(p).EndsWith("-patch", StringComparison.OrdinalIgnoreCase))
@@ -488,12 +494,15 @@ internal sealed class JsonObjectBuilder
         {
             if (Path.GetFileName(path).Equals("nss.npa", StringComparison.OrdinalIgnoreCase))
                 continue;
+            string archiveName = Path.GetFileName(path);
+            if (!mountedArchives.Add(archiveName))
+                continue;
             mounts.Add(
                 (System.Text.Json.Nodes.JsonNode)
                     new System.Text.Json.Nodes.JsonObject
                     {
                         ["mount"] = MountName(Path.GetFileNameWithoutExtension(path)),
-                        ["archive"] = Path.GetFileName(path),
+                        ["archive"] = archiveName,
                     }
             );
         }

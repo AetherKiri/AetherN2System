@@ -44,6 +44,28 @@ internal abstract class RenderItem : Entity, IComparable<RenderItem>
 
     public BlendMode BlendMode { get; set; } = BlendMode.Alpha;
     public FilterMode FilterMode { get; set; } = FilterMode.Linear;
+    public bool IsHidden { get; private set; }
+
+    public override bool Request(NsEntityAction action)
+    {
+        switch (action)
+        {
+            case NsEntityAction.Disable:
+                IsHidden = true;
+                return true;
+            case NsEntityAction.Enable:
+                IsHidden = false;
+                return true;
+            case NsEntityAction.SetAdditiveBlend:
+                BlendMode = NitroSharp.Graphics.BlendMode.Additive;
+                return true;
+            case NsEntityAction.SetMultiplicativeBlend:
+                BlendMode = NitroSharp.Graphics.BlendMode.Multiplicative;
+                return true;
+            default:
+                return base.Request(action);
+        }
+    }
 
     public abstract DesignSize GetSize(RenderContext ctx);
 

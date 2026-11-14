@@ -55,6 +55,7 @@ internal abstract class Entity : EntityScope, EntityInternal, SmallLookupListEnt
     public EntityName Key => Name;
 
     public bool IsEnabled { get; private set; }
+    public bool IsLocked { get; private set; }
 
     public ref readonly SmallLookupList<EntityName, Entity> Children => ref _children;
 
@@ -112,7 +113,20 @@ internal abstract class Entity : EntityScope, EntityInternal, SmallLookupListEnt
     }
 
 
-    public virtual bool Request(NsEntityAction action) => false;
+    public virtual bool Request(NsEntityAction action)
+    {
+        switch (action)
+        {
+            case NsEntityAction.Lock:
+                IsLocked = true;
+                return true;
+            case NsEntityAction.Unlock:
+                IsLocked = false;
+                return true;
+            default:
+                return false;
+        }
+    }
 
     public Entity? TryGetChild(EntityName name) => _children.TryGetValue(name);
 

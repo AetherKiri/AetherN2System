@@ -19,7 +19,7 @@ namespace NitroSharp.Media
 {
     internal sealed record LoopRegion(TimeSpan Start, TimeSpan End);
 
-    internal sealed class MediaStream : IDisposable
+    internal sealed class MediaStream : IDisposable, System.IAsyncDisposable
     {
         private const int IoBufferSize = 4096;
         private static readonly int ErrorEAgain = OperatingSystem.IsMacOS() ? -35 : -11;
@@ -48,6 +48,8 @@ namespace NitroSharp.Media
         private readonly avio_alloc_context_seek _seekFunc;
 
         private Task? _combinedTask;
+        private Task? _disposeTask;
+        private readonly object _lifetimeLock = new();
         private readonly CancellationTokenSource _cts = new();
         private readonly AsyncAutoResetEvent _resumeReading = new();
         private readonly AsyncManualResetEvent _unpauseSignal = new(initialState: false);
@@ -68,9 +70,19 @@ namespace NitroSharp.Media
         private Clock _videoClock;
         private Clock _externalClock;
 
-        public bool IsPlaying =>_combinedTask is { IsCompleted: false }
-            || (_video is not null && !_videoEnded)
-            || _audioSource is { IsPlaying: true };
+        public bool IsPlaying
+        {
+            get
+            {
+                if (_disposeTask is not null)
+                    return false;
+                if (_combinedTask is { IsFaulted: true })
+                    _combinedTask.GetAwaiter().GetResult();
+                return _combinedTask is { IsCompleted: false }
+                    || (_video is not null && !_videoEnded)
+                    || _audioSource is { IsPlaying: true };
+            }
+        }
 
         public TimeSpan Elapsed => TimeSpan.FromSeconds(GetSecondsElapsed());
 
@@ -196,15 +208,13 @@ namespace NitroSharp.Media
                     UnrefPacket(ref packet.Value);
                 }
 
-                // TODO: is it even necessary to call Complete?
-                try
-                {
-                    FrameQueue.Writer.Complete();
-                    PacketQueue.Writer.Complete();
-                }
-                catch (ChannelClosedException)
-                {
-                }
+                CompleteQueues();
+            }
+
+            public void CompleteQueues()
+            {
+                FrameQueue.Writer.TryComplete();
+                PacketQueue.Writer.TryComplete();
             }
 
             public unsafe void Dispose()
@@ -351,6 +361,7 @@ namespace NitroSharp.Media
 
         public void Start()
         {
+            ObjectDisposedException.ThrowIf(_disposeTask is not null, this);
             if (_started) { return; }
             _started = true;
             _unpauseSignal.Set();
@@ -592,7 +603,15 @@ namespace NitroSharp.Media
                     }
 
                     packet.Serial = serial;
-                    await streamCtx.PacketQueue.Writer.WriteAsync(packet);
+                    try
+                    {
+                        await streamCtx.PacketQueue.Writer.WriteAsync(packet);
+                    }
+                    catch (ChannelClosedException)
+                    {
+                        UnrefPacket(ref packet.Value);
+                        return;
+                    }
                 }
                 else if (ret == ffmpeg.AVERROR_EOF && !ignoreEof)
                 {
@@ -753,12 +772,8 @@ namespace NitroSharp.Media
             AudioParameters desiredParams,
             PipeWriter writer)
         {
-            Resampler resampler;
-            unsafe
-            {
-                AVCodecContext* codec = audio.CodecCtx;
-                resampler = new Resampler(codec, desiredParams);
-            }
+            using Resampler resampler = CreateResampler();
+            unsafe Resampler CreateResampler() => new(audio.CodecCtx, desiredParams);
 
             ChannelReader<QueueItem<AVFrame>> audioFrames = audio.FrameQueue.Reader;
             int bytesBuffered = 0;
@@ -847,7 +862,6 @@ namespace NitroSharp.Media
             }
 
             await writer.CompleteAsync();
-            resampler.Dispose();
         }
 
         private async Task ProcessVideo(StreamContext video, YCbCrBufferWriter bufferWriter)
@@ -939,43 +953,53 @@ namespace NitroSharp.Media
             return result == 0 ? ffmpeg.AVERROR_EOF : result;
         }
 
-        public void Dispose()
+        public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+        public ValueTask DisposeAsync()
         {
-            _audioSource?.Pause();
-            _audioSource?.FlushBuffers();
-            _cts.Cancel();
-            _resumeReading.Set();
-            _videoBuffer?.Writer.Clear();
-            _video?.DestroyQueues();
-            _audio?.DestroyQueues();
+            lock (_lifetimeLock)
+                return new ValueTask(_disposeTask ??= DisposeCoreAsync());
+        }
 
-            if (_combinedTask is not null)
+        private async Task DisposeCoreAsync()
+        {
+            try
             {
-                _ = _combinedTask.ContinueWith(
-                    _ => finishDispose(),
-                    TaskContinuationOptions.ExecuteSynchronously
-                );
+                // Wake every possible wait before joining the workers. A paused
+                // decoder or a full PCM pipe cannot otherwise observe cancellation.
+                _cts.Cancel();
+                _unpauseSignal.Set();
+                _resumeReading.Set();
+                _audio?.CompleteQueues();
+                _video?.CompleteQueues();
+                _audioPipe?.Writer.CancelPendingFlush();
+                _audioPipe?.Reader.CancelPendingRead();
+                _audioSource?.Stop();
+                _videoBuffer?.Writer.Clear();
+                if (_combinedTask is not null)
+                    await _combinedTask.ConfigureAwait(false);
             }
-            else
+            catch (Exception) when (_cts.IsCancellationRequested)
             {
-                finishDispose();
+                // Closing the channels interrupts queued readers and writers.
+                // Observe every worker before freeing its native resources.
             }
-
-            void finishDispose()
+            finally
             {
+                _audio?.DestroyQueues();
+                _video?.DestroyQueues();
                 _video?.Dispose();
                 _audio?.Dispose();
                 _videoBuffer?.Dispose();
-
-                if (_audioSource is not null)
+                if (_audioPipe is not null)
                 {
-                    Debug.Assert(_audioSource is not null);
-                    _audioSource.Stop();
+                    await _audioPipe.Writer.CompleteAsync().ConfigureAwait(false);
+                    await _audioPipe.Reader.CompleteAsync().ConfigureAwait(false);
                 }
-
                 _formatContext.Dispose();
                 _fileStream.Dispose();
                 _timer.Stop();
+                _cts.Dispose();
             }
         }
 

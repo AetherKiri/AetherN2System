@@ -48,6 +48,8 @@ internal sealed class Process : Entity
 
         foreach (RenderItem renderItem in GetDescendants<RenderItem>())
         {
+            if (renderItem.IsHidden || !AreMouseStatesVisible(renderItem))
+                continue;
             _renderList.Add(renderItem);
         }
 
@@ -57,6 +59,14 @@ internal sealed class Process : Entity
         {
             renderItem.Render(ctx);
         }
+    }
+
+    private static bool AreMouseStatesVisible(Entity entity)
+    {
+        for (Entity? parent = entity.Parent; parent is not null; parent = parent.Parent)
+            if (parent is MouseStateEntity { IsVisible: false })
+                return false;
+        return true;
     }
 
     public override void Update(GameContext ctx)

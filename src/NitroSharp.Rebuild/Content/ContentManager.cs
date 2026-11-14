@@ -310,29 +310,24 @@ internal sealed class ContentManager : IDisposable
     {
         string[] pathParts = path.ToLowerInvariant().Split("/");
         VfsNode head = _root;
-
-        // This way of browsing folders is not perfect because we can have two possible paths :
-        // one through the Children and one through the MountedArchives.
-        // If nobody does weird stuff with the archives, this shouldn't happen.
-        int depth;
-        for (depth = 0; depth < pathParts.Length - 1; depth++)
+        var nodes = new List<VfsNode>(pathParts.Length + 1) { head };
+        for (int depth = 0; depth < pathParts.Length - 1; depth++)
         {
-            if (head.Children is not null)
-            {
-                head = head.Children[pathParts[depth]];
-            }
-            else
-            {
+            if (head.Children is null || !head.Children.TryGetValue(pathParts[depth], out VfsNode? child))
                 break;
-            }
+            head = child;
+            nodes.Add(head);
         }
 
-        string archivePath = string.Join("/", pathParts, depth, pathParts.Length - depth);
-        foreach (ArchiveFile archive in head.MountedArchives)
+        // Prefer the deepest mount, then fall back to archives mounted at an
+        // ancestor when a more specific directory node exists but has no file.
+        for (int depth = nodes.Count - 1; depth >= 0; depth--)
         {
-            if (archive.Contains(archivePath))
+            string archivePath = string.Join("/", pathParts, depth, pathParts.Length - depth);
+            foreach (ArchiveFile archive in nodes[depth].MountedArchives)
             {
-                return (archive, archivePath);
+                if (archive.Contains(archivePath))
+                    return (archive, archivePath);
             }
         }
 

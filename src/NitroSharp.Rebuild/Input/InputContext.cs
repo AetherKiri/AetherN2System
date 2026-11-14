@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Numerics;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.VM;
 
@@ -26,6 +28,10 @@ internal sealed class InputContext(GameWindow window) : IDisposable
     private readonly float[] _actionValues = new float[s_allActions.Length];
     private readonly bool[] _actionDown = new bool[s_allActions.Length];
     private readonly bool[] _actionTriggered = new bool[s_allActions.Length];
+    private readonly HashSet<GamepadButton> _gamepadPresses = [];
+    private Vector2 _previousMousePosition;
+    private bool _hasMousePosition;
+    private bool _choicePressConsumed;
 
     private InputSnapshot Snapshot { get; set; } = null!;
     private Gamepad Gamepad { get; set; } = Gamepad.Default(window is Sdl3Window);
@@ -33,6 +39,23 @@ internal sealed class InputContext(GameWindow window) : IDisposable
     private float GetActionValue(InputAction action) => _actionValues[(int)action];
     private bool IsActionDown(InputAction action) => _actionDown[(int)action];
     private bool IsActionTriggered(InputAction action) => _actionTriggered[(int)action];
+
+    internal Vector2 MousePosition => Snapshot.MousePosition;
+    internal bool IsMouseButtonDown(MouseButton button) => Snapshot.IsMouseDown(button);
+    internal bool WasActionTriggered(InputAction action) => _actionTriggered[(int)action];
+    internal bool PointerMoved { get; private set; }
+    internal bool ChoicePointerPressed => !_choicePressConsumed
+        && (Snapshot.IsMouseDown(MouseButton.Left) || Snapshot.IsTouchDown);
+
+    internal bool ConsumeChoicePress(bool pointer)
+    {
+        if (_choicePressConsumed || !(pointer ? ChoicePointerPressed : WasActionTriggered(InputAction.Enter)))
+            return false;
+        _choicePressConsumed = true;
+        Consume(InputAction.Enter);
+        Consume(InputAction.Advance);
+        return true;
+    }
 
     public bool Consume(InputAction action)
     {
@@ -45,6 +68,10 @@ internal sealed class InputContext(GameWindow window) : IDisposable
     public void Update(GameWindow window, SystemVariableLookup systemVariables)
     {
         Snapshot = window.PumpEvents();
+        PointerMoved = !_hasMousePosition || Snapshot.MousePosition != _previousMousePosition;
+        _previousMousePosition = Snapshot.MousePosition;
+        _hasMousePosition = true;
+        _choicePressConsumed = false;
         ProcessGamepadEvents();
 
         foreach (InputAction action in s_allActions)
@@ -77,14 +104,37 @@ internal sealed class InputContext(GameWindow window) : IDisposable
         int index = (int)action;
         float value = _inputMap.GetValue(action, Snapshot, Gamepad);
         bool isDown = value > 0.5f;
-        _actionTriggered[index] = !_actionDown[index] && isDown;
+        _actionTriggered[index] = (!_actionDown[index] && isDown) || HasPressPulse(action);
         _actionDown[index] = isDown;
         _actionValues[index] = value;
+    }
+
+    private bool HasPressPulse(InputAction action)
+    {
+        bool confirm = Snapshot.IsKeyDown(Key.Return) || Snapshot.IsKeyDown(Key.KeypadEnter)
+            || _gamepadPresses.Contains(GamepadButton.SouthA) || Gamepad.IsButtonDown(GamepadButton.SouthA);
+        return action switch
+        {
+            InputAction.Enter => confirm,
+            InputAction.Advance => confirm || Snapshot.IsKeyDown(Key.Space)
+                || Snapshot.IsMouseDown(MouseButton.Left) || Snapshot.IsTouchDown,
+            InputAction.Back => Snapshot.IsMouseDown(MouseButton.Right)
+                || Snapshot.IsKeyDown(Key.Backspace) || Snapshot.IsKeyDown(Key.Escape)
+                || _gamepadPresses.Contains(GamepadButton.EastB),
+            InputAction.Left => Snapshot.IsKeyDown(Key.Left) || _gamepadPresses.Contains(GamepadButton.DPadLeft),
+            InputAction.Up => Snapshot.IsKeyDown(Key.Up) || _gamepadPresses.Contains(GamepadButton.DPadUp)
+                || Snapshot.WheelDelta.Y > 0,
+            InputAction.Right => Snapshot.IsKeyDown(Key.Right) || _gamepadPresses.Contains(GamepadButton.DPadRight),
+            InputAction.Down => Snapshot.IsKeyDown(Key.Down) || _gamepadPresses.Contains(GamepadButton.DPadDown)
+                || Snapshot.WheelDelta.Y < 0,
+            _ => false
+        };
     }
 
     private void ProcessGamepadEvents()
     {
         Gamepad.Refresh();
+        _gamepadPresses.Clear();
         foreach (GamepadEvent ev in Snapshot.GamepadEvents)
         {
             switch (ev.Kind)
@@ -110,6 +160,8 @@ internal sealed class InputContext(GameWindow window) : IDisposable
                 case GamepadEventKind.ButtonUp:
                 case GamepadEventKind.AxisMotion:
                 {
+                    if (ev.Kind == GamepadEventKind.ButtonDown && !Gamepad.ButtonState(ev.Button))
+                        _gamepadPresses.Add(ev.Button);
                     Gamepad.HandleEvent(ev);
                     break;
                 }
@@ -132,7 +184,6 @@ internal sealed class InputContext(GameWindow window) : IDisposable
         map.Bind(InputAction.Back, new Binding { Key = Key.Escape });
         map.Bind(InputAction.Back, new Binding { GamepadButton = GamepadButton.EastB });
 
-        map.Bind(InputAction.Enter, new Binding { MouseButton = MouseButton.Left });
         map.Bind(InputAction.Enter, new Binding { Key = Key.Return });
         map.Bind(InputAction.Enter, new Binding { Key = Key.KeypadEnter });
         map.Bind(InputAction.Enter, new Binding { GamepadButton = GamepadButton.SouthA });
