@@ -408,7 +408,7 @@ namespace NitroSharp.Graphics
             }
             catch
             {
-                GraphicsDevice.DisposeWhenIdle(target);
+                GraphicsUtils.DisposeAfterIdle(GraphicsDevice, target);
                 throw;
             }
         }

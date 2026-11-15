@@ -15,8 +15,9 @@ internal sealed class HostedWindow(ScreenSizeU size) : InputSnapshot, GameWindow
     public SwapchainSource SwapchainSource => throw new NotSupportedException("Offscreen surface");
     public ScreenSizeU Size => size;
     public bool Exists { get; private set; } = true;
-    public event Action? CloseRequested;
-    public event Action? Resized;
+    // The embedding host owns closure and the fixed offscreen surface size.
+    public event Action? CloseRequested { add { } remove { } }
+    public event Action? Resized { add { } remove { } }
     public override ReadOnlySpan<KeyEvent> KeyEvents => CollectionsMarshal.AsSpan(_keys);
     public override ReadOnlySpan<MouseButtonEvent> MouseEvents =>
         CollectionsMarshal.AsSpan(_buttons);

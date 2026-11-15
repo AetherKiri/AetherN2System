@@ -42,7 +42,9 @@ internal sealed class GameContext : IDisposable
     internal required AudioContext AudioContext { get; init; }
     internal required InputContext InputContext { get; init; }
     internal required NsScriptVM VM { get; init; }
-    internal Builtins Builtins { get; private set; }
+    private Builtins? _builtins;
+    internal Builtins Builtins => _builtins
+        ?? throw new InvalidOperationException("The game context has not finished initialization.");
     internal required World World { get; init; }
     internal Stopwatch Clock { get; } = Stopwatch.StartNew();
     internal required Log RootLog { get; init; }
@@ -56,9 +58,7 @@ internal sealed class GameContext : IDisposable
         long prevFrameTicks = 0L;
         long frameId = 0L;
 
-        bool needsResize = false;
         bool closeRequested = false;
-        Window.Resized += () => needsResize = true;
         Window.CloseRequested += () => closeRequested = true;
 
         while (!ShutdownSignal.IsCancellationRequested && !closeRequested)
@@ -191,7 +191,7 @@ internal sealed class GameContext : IDisposable
                 World = new World(process, thread),
                 RootLog = log,
             };
-            context.Builtins = new Builtins(context);
+            context._builtins = new Builtins(context);
             log.Info(
                 $"Init successful. Graphics backend: {gd.BackendType}; audio backend: {audio.Device.Backend}."
             );
@@ -307,7 +307,7 @@ internal sealed class GameContext : IDisposable
             GraphicsDevice offscreenDevice = backend switch
             {
                 GraphicsBackend.Metal => GraphicsDevice.CreateMetal(options),
-                GraphicsBackend.Direct3D11 => GraphicsDevice.CreateD3D11(options),
+                GraphicsBackend.Direct3D11 when OperatingSystem.IsWindows() => GraphicsDevice.CreateD3D11(options),
                 GraphicsBackend.Vulkan => GraphicsDevice.CreateVulkan(options),
                 _ => throw new PlatformNotSupportedException(
                     "Embedded graphics requires Metal, D3D11 or Vulkan."
@@ -336,7 +336,7 @@ internal sealed class GameContext : IDisposable
 
         GraphicsDevice device = backend switch
         {
-            GraphicsBackend.Direct3D11 => GraphicsDevice.CreateD3D11(options),
+            GraphicsBackend.Direct3D11 when OperatingSystem.IsWindows() => GraphicsDevice.CreateD3D11(options),
             GraphicsBackend.Vulkan => GraphicsDevice.CreateVulkan(options),
             _ => throw new Exception($"Backend {backend} is not currently supported."),
         };

@@ -5,6 +5,15 @@ namespace NitroSharp.Graphics;
 
 internal static class GraphicsUtils
 {
+    public static void DisposeAfterIdle(Veldrid.GraphicsDevice device, IDisposable resource)
+    {
+        // Recorded or submitted commands may still reference this resource.
+        // RenderContext waits for idle during readback and shutdown, draining this queue.
+#pragma warning disable CS0618 // Veldrid's deferred-disposal contract requires WaitForIdle.
+        device.DisposeWhenIdle(resource);
+#pragma warning restore CS0618
+    }
+
     public static unsafe void CopyTextureRegion(
         void* src,
         uint srcX, uint srcY, uint srcZ,

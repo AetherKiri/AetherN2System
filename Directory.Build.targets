@@ -1,0 +1,11 @@
+<Project>
+  <Target Name="PruneObsoleteSprintfRuntimeAssets"
+          AfterTargets="ResolvePackageAssets"
+          Condition="'$(TargetFrameworkIdentifier)' == '.NETCoreApp' And $([MSBuild]::VersionGreaterThanOrEquals('$(_TargetFrameworkVersionWithoutV)', '8.0')) And '$(UseRidGraph)' != 'true' And @(RuntimeHostConfigurationOption->WithMetadataValue('Identity', 'System.Runtime.Loader.UseRidGraph')->WithMetadataValue('Value', 'true')->Count()) == 0">
+    <!-- .NET 8+ ignores these versioned RIDs; Sprintf.NET also provides portable Windows assets. Keep those usable assets and omit only obsolete groups from dependency metadata. -->
+    <ItemGroup>
+      <RuntimeTargetsCopyLocalItems Remove="@(RuntimeTargetsCopyLocalItems)"
+          Condition="'%(RuntimeTargetsCopyLocalItems.NuGetPackageId)' == 'Sprintf.NET' And ('%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'win10-arm' Or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'win10-x86' Or '%(RuntimeTargetsCopyLocalItems.RuntimeIdentifier)' == 'win10-x64')" />
+    </ItemGroup>
+  </Target>
+</Project>

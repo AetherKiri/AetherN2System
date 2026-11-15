@@ -138,7 +138,7 @@ internal sealed class Builtins : BuiltInFunctions
         RenderContext render = _ctx.RenderContext;
         var effect = new PlainEffect(name, parent, priority, new DesignSizeU(width, height),
             rectangle => render.CapturePresentedFrame(rectangle),
-            texture => render.GraphicsDevice.DisposeWhenIdle(texture))
+            texture => GraphicsUtils.DisposeAfterIdle(render.GraphicsDevice, texture))
             .WithPosition(render, x, y);
         effect.RefreshSnapshot();
         _world.AddEntity(effect);

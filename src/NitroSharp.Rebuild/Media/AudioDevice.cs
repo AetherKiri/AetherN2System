@@ -41,7 +41,8 @@ internal abstract class AudioDevice(in AudioParameters audioParameters) : IAsync
         {
             AudioBackend.OpenAL => new OpenALAudioDevice(audioParameters),
             AudioBackend.Null => new NullAudioDevice(audioParameters),
-            AudioBackend.XAudio2 => new XAudio2AudioDevice(audioParameters),
+            AudioBackend.XAudio2 when OperatingSystem.IsWindows() => new XAudio2AudioDevice(audioParameters),
+            AudioBackend.XAudio2 => throw new PlatformNotSupportedException("XAudio2 requires Windows."),
             _ => throw new NotImplementedException($"Backend '{backend}' is not implemented")
         };
 }

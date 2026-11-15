@@ -2149,7 +2149,7 @@ public unsafe partial struct ID3D11DeviceContextVtbl
     public void* @CSGetConstantBuffers;
     public void* @ClearState;
     public void* @Flush;
-    public void* @GetType;
+    public new void* @GetType;
     public void* @GetContextFlags;
     public void* @FinishCommandList;
 }
@@ -2215,7 +2215,7 @@ public unsafe partial struct ID3D11Texture2DVtbl
     public void* @GetPrivateData;
     public void* @SetPrivateData;
     public void* @SetPrivateDataInterface;
-    public void* @GetType;
+    public new void* @GetType;
     public void* @SetEvictionPriority;
     public void* @GetEvictionPriority;
     public void* @GetDesc;
@@ -2396,7 +2396,7 @@ public unsafe partial struct IDirect3DSurface9Vtbl
     public void* @SetPriority;
     public void* @GetPriority;
     public void* @PreLoad;
-    public void* @GetType;
+    public new void* @GetType;
     public void* @GetContainer;
     public void* @GetDesc;
     public void* @LockRect;

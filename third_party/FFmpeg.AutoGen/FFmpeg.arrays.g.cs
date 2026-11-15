@@ -1,5 +1,8 @@
 using System;
 
+// Generated fixed-array fields preserve native layout and are accessed through &_0.
+#pragma warning disable CS0169
+
 namespace FFmpeg.AutoGen;
 
 public unsafe struct AVRational2 : IFixedArray<AVRational>
@@ -595,3 +598,5 @@ public unsafe struct AVRational25x25 : IFixedArray<AVRational25>
     }
     public static implicit operator AVRational25[](AVRational25x25 @struct) => @struct.ToArray();
 }
+
+#pragma warning restore CS0169

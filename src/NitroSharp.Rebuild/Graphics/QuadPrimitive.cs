@@ -33,11 +33,11 @@ internal struct QuadVertex
 }
 
 [UsedImplicitly(ImplicitUseTargetFlags.Members)]
+[StructLayout(LayoutKind.Sequential, Size = 32)] // Preserve the shader's padded vertex stride.
 internal struct QuadVertexUV3
 {
     public Vector2 Position;
     public Vector3 TexCoord;
-    private Vector3 _padding;
 
     public static readonly VertexLayoutDescription LayoutDescription = new(
         stride: 32,

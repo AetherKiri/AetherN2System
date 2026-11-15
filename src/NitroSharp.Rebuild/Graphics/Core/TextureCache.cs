@@ -483,8 +483,8 @@ namespace NitroSharp.Graphics.Core
                     layer.Map = _gd.Map(newStaging, MapMode.Write, layer.Index);
                 }
 
-                _gd.DisposeWhenIdle(_stagingTexture);
-                _gd.DisposeWhenIdle(_sampledTexture.NotNull());
+                GraphicsUtils.DisposeAfterIdle(_gd, _stagingTexture);
+                GraphicsUtils.DisposeAfterIdle(_gd, _sampledTexture.NotNull());
             }
             else
             {

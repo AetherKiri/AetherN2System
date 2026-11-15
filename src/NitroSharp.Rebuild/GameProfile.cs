@@ -95,7 +95,6 @@ public sealed class GameProfile
         string getString(string key) => property(key).GetString()!;
         string? getStringOpt(string key) => propertyOpt(key)?.GetString();
 
-        uint getUInt(string key) => property(key).GetUInt32();
         uint? getUIntOpt(string key) => propertyOpt(key)?.GetUInt32();
 
         bool? getBoolOpt(string key) => propertyOpt(key)?.GetBoolean();

@@ -141,7 +141,10 @@ internal static unsafe class Exports
             );
             Config config = Config.Read(configStream);
             window = new HostedWindow(size);
+            // The native create ABI is synchronous and runs without a managed UI context.
+#pragma warning disable VSTHRD002
             context = GameContext.Create(window, config, profile).GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
             byte[] pixels = new byte[checked((int)(size.Width * size.Height * 4))];
             var instance = new Instance
             {

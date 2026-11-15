@@ -35,7 +35,8 @@ internal sealed class Icon : IDisposable
 
     private readonly Texture _texture;
     private readonly IconAnimation _animation;
-    private uint _activeFrame;
+    // Icon animation is currently disabled, so render the first layer.
+    private readonly uint _activeFrame = 0;
 
     private Icon(Texture texture)
     {
