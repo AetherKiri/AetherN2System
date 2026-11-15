@@ -21,6 +21,8 @@ internal sealed class DialoguePage : RenderItem
     private bool _unreadText;
     private bool _clearBeforeMarkup;
     private bool _disableTextAnimation;
+    private bool _entered;
+    private bool _destroyWhenIdle;
     private DialogueTextAnimation? _textAnimation;
     private int _charactersSinceInput;
     private float _waitElapsed;
@@ -30,6 +32,8 @@ internal sealed class DialoguePage : RenderItem
         in DialogueBlockToken token, uint maxWidth, uint maxHeight, int lineSpacing)
         : base(name, parent, priority)
     {
+        // Loading prepares a page; the script enters it after its window is ready.
+        base.Request(NsEntityAction.Disable);
         _token = token;
         _verticalGlyphs = parent.Process.FontSettings.VerticalGlyphs;
         _block = token.Module.GetSubroutine(token.SubroutineIndex).DialogueBlocks[token.Offset];
@@ -37,12 +41,23 @@ internal sealed class DialoguePage : RenderItem
             fixedLineHeight: lineSpacing > 0 ? lineSpacing : null);
     }
 
-    public bool IsIdle { get; private set; }
+    public bool IsIdle { get; private set; } = true;
     internal bool IsRevealing => _textAnimation is { IsActive: true };
     public override DesignSize GetSize(RenderContext ctx) => TextBlock.GetTextSize(_layout, _margin);
 
     public override bool Request(NsEntityAction action)
     {
+        if (action == NsEntityAction.Enable && !_entered)
+        {
+            _entered = true;
+            IsIdle = false;
+        }
+        else if (action == NsEntityAction.DestroyWhenIdle)
+        {
+            _destroyWhenIdle = true;
+            if (IsIdle) World.DestroyEntity(this);
+            return true;
+        }
         if (action == NsEntityAction.NoTextAnimation)
         {
             _disableTextAnimation = true;
@@ -55,6 +70,7 @@ internal sealed class DialoguePage : RenderItem
     public override void Update(GameContext ctx)
     {
         base.Update(ctx);
+        if (!_entered || IsPendingDestruction) return;
         ctx.RenderContext.Text.RequestGlyphs(_layout);
         if (ctx.VM.SystemVariables.TextErase.AsBool() ?? false)
         {
@@ -172,12 +188,13 @@ internal sealed class DialoguePage : RenderItem
             }
         }
     done:
+        if (IsIdle && _destroyWhenIdle) World.DestroyEntity(this);
         ctx.RenderContext.Text.RequestGlyphs(_layout);
     }
 
     public override void Render(GameContext ctx)
     {
-        if (ctx.VM.SystemVariables.TextErase.AsBool() ?? false) return;
+        if (!_entered || IsPendingDestruction || (ctx.VM.SystemVariables.TextErase.AsBool() ?? false)) return;
         RenderContext render = ctx.RenderContext;
         render.Text.Render(render, render.MainBatch, _layout,
             render.GetTransformMatrix(Transform, GetSize(render), useScaling: true, aligned: false),

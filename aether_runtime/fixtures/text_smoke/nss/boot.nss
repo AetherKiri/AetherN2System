@@ -9,6 +9,7 @@ chapter main
     }
     CreateWindow("dialogue", 10, 20, 140, 580, 190, true);
     LoadText("main", "dialogue", "page", 580, 190, 0, 32);
+    Request("@page", Enter);
     WaitText("@page", 0);
     CreateColor("complete", 20, 620, 340, 20, 20, "GREEN");
     WaitKey();

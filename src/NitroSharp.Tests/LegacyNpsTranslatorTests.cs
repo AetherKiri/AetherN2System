@@ -14,6 +14,62 @@ namespace NitroSharp.Tests;
 
 public sealed class LegacyNpsTranslatorTests
 {
+    [Fact]
+    public void ConfigIsModalAppliesLiveSettingsAndReturnsToTheCallingScript()
+    {
+        var actions = Enumerable.Repeat("legacy_config_bgm_minus", 20)
+            .Concat(Enumerable.Repeat("legacy_config_se_plus", 20))
+            .Concat(new[] { "legacy_config_voice_mute", "legacy_config_text_plus", "legacy_config_auto_plus", "legacy_config_close", "legacy_config_close" });
+        var builtins = new ConfigBuiltins(actions);
+        var translated = LegacyNpsTranslator.Translate("<SYSTEM CMD=config><CALC WORKNAME=after OPERATOR=7><SYSTEM CMD=config>", "config.nps");
+        var vm = Execute(translated, builtins);
+        Assert.Empty(translated.Diagnostics);
+        Assert.DoesNotContain("LegacyUnsupported", translated.Source);
+        Assert.Equal(0, vm.SystemVariables.GetAudioSettings(NsAudioKind.BackgroundMusic).Volume!.Value.AsNumber());
+        Assert.Equal(1000, vm.SystemVariables.GetAudioSettings(NsAudioKind.SoundEffect).Volume!.Value.AsNumber());
+        Assert.False(vm.SystemVariables.GetAudioSettings(NsAudioKind.Voice).Enabled!.Value.AsBool());
+        Assert.Equal(40, vm.SystemVariables.GetTextSettings().Interval!.Value.AsNumber());
+        Assert.Equal(125, vm.SystemVariables.GetTextSettings().AutoWaitPerCharacter!.Value.AsNumber());
+        Assert.Equal(7, vm.DumpVariables().Globals.Single(pair => pair.Item1 == "legacy_work_local_0_AFTER").Item2.AsNumber());
+        Assert.Equal(2, builtins.Opened);
+        Assert.Equal(2, builtins.Closed);
+        Assert.Empty(builtins.Pending);
+    }
+
+    [Theory]
+    [InlineData("SYSTEM_keydown_esc")]
+    [InlineData("SYSTEM_r_button_down")]
+    public void ConfigEscapeReturnsWithoutChangingTheSceneOrAudio(string input)
+    {
+        var translated = LegacyNpsTranslator.Translate("<SYSTEM CMD=config><CALC WORKNAME=after OPERATOR=1>", "escape.nps");
+        translated = translated with { Source = translated.Source.Replace("scene legacy_entry {", "scene legacy_entry { $" + input + " = true;") };
+        var builtins = new ConfigBuiltins([]);
+        var vm = Execute(translated, builtins);
+        Assert.Equal(1, builtins.Closed);
+        Assert.DoesNotContain(builtins.Deleted, path => path == "legacy_front" || path == "legacy_stage");
+        Assert.Equal(1000, vm.SystemVariables.GetAudioSettings(NsAudioKind.BackgroundMusic).Volume!.Value.AsNumber());
+        Assert.Equal(1, vm.DumpVariables().Globals.Single(pair => pair.Item1 == "legacy_work_local_0_AFTER").Item2.AsNumber());
+    }
+
+    private sealed class ConfigBuiltins(IEnumerable<string> actions) : BuiltInFunctions
+    {
+        public readonly Queue<string> Pending = new(actions);
+        public readonly List<string> Deleted = [];
+        public int Opened, Closed;
+        protected override void NotImplemented(string functionName = "") { }
+        public override void CreateEntity(in EntityPath path) { if (path.ToString() == "legacy_config") Opened++; }
+        public override bool HandleInputEvents(in EntityQuery query)
+        {
+            if (!Pending.TryPeek(out string? next) || query.ToString() != next) return false;
+            Pending.Dequeue(); return true;
+        }
+        public override void DestroyEntities(in EntityQuery query)
+        {
+            Deleted.Add(query.ToString());
+            if (query.ToString() == "legacy_config") Closed++;
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -152,6 +208,8 @@ public sealed class LegacyNpsTranslatorTests
         Assert.Equal(new[] { (488u, 690u), (690u, 488u) }, builtins.TextAreas);
         Assert.Equal(new[] { (760f, 56f, 488u, 700u), (60f, 46f, 690u, 498u) }, builtins.Windows);
         Assert.Equal(("legacy_box/page1", 90f), builtins.PageRotation);
+        Assert.Equal(new[] { "legacy_box/page1", "legacy_box/page4" }, builtins.EnteredPages);
+        Assert.True(translation.Source.IndexOf("Rotate(\"legacy_box/page1\"", StringComparison.Ordinal) < translation.Source.IndexOf("Request(\"legacy_box/page1\", Enter)", StringComparison.Ordinal));
         Assert.DoesNotContain("LegacyUnsupported", translation.Source);
     }
 
@@ -281,7 +339,7 @@ public sealed class LegacyNpsTranslatorTests
         Assert.Contains(translated.Diagnostics, value => value.Contains("voice.nps:1: missing authored VOICE 'absent'"));
         var builtins = new MediaBuiltins();
         Execute(translated, builtins);
-        Assert.Equal(new[] { "stop:legacy_voice", "audio:voice/existing.ogg", "play:legacy_voice", "stop:legacy_voice" }, builtins.Events);
+        Assert.Equal(new[] { "stop:legacy_voice", "audio:voice/existing.ogg", "play:legacy_voice", "stop:legacy_voice", "enable:legacy_box/page3" }, builtins.Events);
     }
 
     [Fact]
@@ -574,6 +632,9 @@ public sealed class LegacyNpsTranslatorTests
 
     private sealed class SceneBuiltins : BuiltInFunctions
     {
+        public readonly List<string> EnteredPages = [];
+        public override void Request(in EntityQuery query, NsEntityAction action) { if (action == NsEntityAction.Enable) EnteredPages.Add(query.ToString()); }
+        public override void WaitText(in EntityQuery query, TimeSpan timeout) => Assert.Contains(query.ToString(), EnteredPages);
         public readonly Dictionary<string, SceneVisual> Visuals = new();
         public readonly List<Dictionary<string, SceneVisual>> Scenes = [];
         public readonly List<(uint, uint)> TextAreas = [];
@@ -778,7 +839,7 @@ public sealed class LegacyNpsTranslatorTests
         var translated = LegacyNpsTranslator.Translate("<BOX TYPE=9><VOICE SRC='speaker/001'>Hello world<k><UNSUPPORTED>", "story.nps");
         Assert.Contains("CreateSound(\"legacy_voice\", Voice, \"voice/speaker/001.ogg\")", translated.Source);
         Assert.Contains("<PRE legacy_box>\n[page2]\nHello world", translated.Source.Replace("\r\n", "\n"));
-        Assert.Contains("WaitText(\"legacy_box/page2\", 0)", translated.Source);
+        Assert.Contains("Request(\"legacy_box/page2\", Enter); WaitText(\"legacy_box/page2\", 0)", translated.Source);
         Assert.Contains("LegacyUnsupported(\"story.nps\", 1, \"UNSUPPORTED\")", translated.Source);
     }
 
@@ -787,7 +848,8 @@ public sealed class LegacyNpsTranslatorTests
     {
         var translated = LegacyNpsTranslator.Translate("<INCLUDE SRC=include.h><SYSTEM CMD=config><UNKNOWN>", "menu.nps");
         Assert.Contains(translated.Diagnostics, value => value.Contains("standard include.h"));
-        Assert.Contains("LegacyUnsupported(\"menu.nps\", 1, \"SYSTEM config\")", translated.Source);
+        Assert.DoesNotContain("SYSTEM config\")", translated.Source);
+        Assert.Contains("Settings</FONT>", translated.Source);
         Assert.Contains("LegacyUnsupported(\"menu.nps\", 1, \"UNKNOWN\")", translated.Source);
     }
 

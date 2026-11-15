@@ -21,7 +21,8 @@ internal sealed record LegacyNpsChoiceBox(int X, int Y, int Width, int Height,
 
 internal sealed record LegacyNpsPresentation(IReadOnlyDictionary<int, LegacyNpsTextBox> TextBoxes,
     IReadOnlyDictionary<string, int> Alignments, IReadOnlyDictionary<string, string>? TransitionMasks = null,
-    IReadOnlyDictionary<int, LegacyNpsChoiceBox>? ChoiceBoxes = null);
+    IReadOnlyDictionary<int, LegacyNpsChoiceBox>? ChoiceBoxes = null,
+    int BgmVolume = 100, int SeVolume = 100, int VoiceVolume = 100);
 
 // A bounded dispatcher keeps jumps inside the NSS bytecode's signed 16-bit range.
 // Unsupported operations remain executable failures, rather than compilation-time
@@ -51,6 +52,8 @@ internal static class LegacyNpsTranslator
         private readonly Dictionary<string, int> _layers = new(StringComparer.OrdinalIgnoreCase);
         private readonly StringBuilder _output = new();
         private int _workTemporary;
+        private bool _usesSettings;
+        private readonly LegacyNpsPresentation? _presentation;
         private string Pc => "$" + _prefix + "pc";
         private string Dispatch => "$" + _prefix + "dispatch";
         private string Stage => "$" + _prefix + "stage";
@@ -65,7 +68,7 @@ internal static class LegacyNpsTranslator
         public Translation(string source, string name, Func<string, string>? module,
             Func<string, string, string>? asset, int width, int height, LegacyNpsPresentation? presentation)
         {
-            _name = name; _width = width; _height = height;
+            _name = name; _width = width; _height = height; _presentation = presentation;
             if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
             _prefix = "legacy_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..12] + "_";
             _module = module ?? (path => Path.ChangeExtension(path.Replace('\\', '/'), ".nss"));
@@ -99,6 +102,7 @@ internal static class LegacyNpsTranslator
         {
             Line("chapter main { call_scene @->legacy_entry; }");
             Line("scene legacy_entry {");
+            Line(LegacyNpsSettings.Initialize(_presentation));
             Line($"{Pc} = 0; {Front} = \"legacy_front\"; {Stage} = \"legacy_stage\";");
             Line("CreateName(\"legacy_front\"); CreateName(\"legacy_stage\");");
             Line($"{Box} = 9; {_prefix}reset_scene();");
@@ -127,6 +131,7 @@ internal static class LegacyNpsTranslator
             }
             EmitSceneFunctions();
             EmitDelayedScrollFunctions();
+            if (_usesSettings) Line(LegacyNpsSettings.Generate(_prefix + "config", _width, _height));
             return new LegacyNpsTranslation(_output.ToString(), _diagnostics);
         }
 
@@ -152,7 +157,7 @@ internal static class LegacyNpsTranslator
                         Line($"SetVertex(\"legacy_box/{block}\", 0, 0); Rotate(\"legacy_box/{block}\", 0, 0, 0, 90, null, false);");
                     Line("}");
                 }
-                Line($"WaitText(\"legacy_box/{block}\", 0); Delete(\"legacy_box/{block}\");");
+                Line($"Request(\"legacy_box/{block}\", Enter); WaitText(\"legacy_box/{block}\", 0); Delete(\"legacy_box/{block}\");");
                 return;
             }
             string A(string key, string fallback = "") => token.Attributes.GetValueOrDefault(key, fallback);
@@ -306,6 +311,13 @@ internal static class LegacyNpsTranslator
                     {
                         Line($"VariableValue($, {Q(LocalKey("timer"))}, 0);");
                         _diagnostics.Add($"{_name}:{token.Line}: optional SYSTEM timerclear capability is unsupported: the authored reset is retained, but host play-time tracking is not connected.");
+                    }
+                    else if (A("CMD").Equals("config", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _usesSettings = true;
+                        Line($"{_prefix}config();");
+                        foreach (var (type, box) in _boxes)
+                            if (box.ColumnarWriting) Line($"if ({Box} == {type}) {{ SetTextOrientation(true); }}");
                     }
                     else if (A("CMD").Equals("ending", StringComparison.OrdinalIgnoreCase)) EmitEnding(token);
                     else if (A("CMD").Equals("sceneChange", StringComparison.OrdinalIgnoreCase))

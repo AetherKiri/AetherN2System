@@ -1,0 +1,9 @@
+{
+  "product.name": "Aether N2 dialogue lifecycle fixture",
+  "product.displayName": "Aether N2 dialogue lifecycle fixture",
+  "designResolution": "640x360",
+  "startupScript": "boot.nss",
+  "dev.contentRoot": ".",
+  "dev.scriptRoot": "nss",
+  "dev.useUtf8": true
+}

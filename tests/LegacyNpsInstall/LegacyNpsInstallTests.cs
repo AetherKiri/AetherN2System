@@ -28,6 +28,24 @@ public sealed class LegacyNpsInstallTests : IDisposable
     }
 
     [Fact]
+    public void ConfigUsesInstallationChannelVolumesAndCompilesItsModalControls()
+    {
+        Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys.ini", _sjis.GetBytes("width=800\nheight=600\nbgm_volume=60\nse_volume=50\nvoice_volume=100\n"));
+        Write("script/start.nps", _sjis.GetBytes("<SYSTEM CMD=config><END OPTION=CLOSE>"));
+        var settings = LegacyNpsInstall.Prepare(_root, Path.Combine(_root, "cache"));
+        string source = File.ReadAllText(Path.Combine(settings.ScriptRoot, settings.StartupScript));
+        Assert.Contains("#SYSTEM_sound_volume_bgm = 600", source);
+        Assert.Contains("#SYSTEM_sound_volume_se = 500", source);
+        Assert.Contains("#SYSTEM_sound_volume_voice = 1000", source);
+        Assert.Contains("legacy_config_close", source);
+        Assert.DoesNotContain("LegacyUnsupported", source);
+        var compilation = new Compilation(settings.ScriptRoot, Encoding.UTF8);
+        var emitted = compilation.Emit([compilation.GetSourceModule(settings.StartupScript)], settings.ScriptRoot, "globals");
+        Assert.Empty(emitted.Diagnostics);
+    }
+
+    [Fact]
     public void ColumnarPresentationRetainsVerticalBoxAndConfiguredTextBoundaries()
     {
         Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));

@@ -101,7 +101,9 @@ internal static class LegacyNpsInstall
                 ("bgm", "sound"), ("se", "sound"), ("voice", "voice"), ("movie", "mpeg") })
                 _paths[key] = Normalize(Value(system, key, fallback));
             int width = Number("width", 800, 16384), height = Number("height", 600, 16384);
-            LegacyNpsPresentation presentation = ReadPresentation(width, height);
+            int Volume(string key) => int.TryParse(Value(system, key, "100"), out int value) ? Math.Clamp(value, 0, 100) : 100;
+            LegacyNpsPresentation presentation = ReadPresentation(width, height) with
+            { BgmVolume = Volume("bgm_volume"), SeVolume = Volume("se_volume"), VoiceVolume = Volume("voice_volume") };
             byte[] beginBytes = game.GetValueOrDefault("Begin")
                 ?? throw new InvalidDataException("Legacy game.ini has no Begin script.");
             Resource startup = FindScript(Candidates(beginBytes))
