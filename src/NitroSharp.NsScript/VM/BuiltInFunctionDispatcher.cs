@@ -1404,6 +1404,8 @@ internal sealed class BuiltInFunctionDispatcher
                 BuiltInType.BuiltInConstant
                     => EnumConversions.ToEaseFunction(val.AsBuiltInConstant()!.Value),
                 BuiltInType.Null => NsEaseFunction.Linear,
+                // Native easing selects its linear default for an unset numeric variable (zero).
+                BuiltInType.Numeric when val.AsNumber() == 0 => NsEaseFunction.Linear,
                 _ => UnexpectedType<NsEaseFunction>(val.Type)
             };
         }
