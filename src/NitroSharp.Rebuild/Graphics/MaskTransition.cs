@@ -5,7 +5,7 @@ using Veldrid;
 
 namespace NitroSharp.Graphics;
 
-internal sealed class MaskTransition : AnimationWithDuration, IDisposable
+internal sealed partial class MaskTransition : AnimationWithDuration, IDisposable
 {
     private AssetRef<Texture>? _mask;
     private readonly float _source;

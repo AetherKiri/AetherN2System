@@ -5,7 +5,7 @@ using NitroSharp.Text;
 
 namespace NitroSharp;
 
-internal sealed class Process : Entity
+internal sealed partial class Process : Entity
 {
     public FontSettings FontSettings { get; set; }
     private readonly List<Entity> _updateList = [];

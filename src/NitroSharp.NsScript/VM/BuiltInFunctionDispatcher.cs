@@ -46,6 +46,15 @@ internal sealed class BuiltInFunctionDispatcher
         var args = new ArgConsumer(arguments);
         switch (function)
         {
+            case BuiltInFunction.ReadFile:
+                SetResult(ConstantValue.String(_impl.ReadFile(args.TakeString())));
+                break;
+            case BuiltInFunction.WriteFile:
+                _impl.WriteFile(args.TakeString(), args.TakeString(), args.Count > 2 && args.TakeBool());
+                break;
+            case BuiltInFunction.OpenSaveMenu:
+                _impl.OpenSaveMenu(args.TakeBool());
+                break;
             case BuiltInFunction.DrawLegacyTransition:
                 EntityQuery legacyQuery = args.TakeEntityQuery();
                 TimeSpan legacyDuration = args.TakeTimeSpan();

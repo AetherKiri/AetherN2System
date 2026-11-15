@@ -14,6 +14,13 @@ internal sealed class NsArray(ConstantValue scalar)
     private readonly Dictionary<string, NsArray> _names = new(StringComparer.Ordinal);
 
     public int Count => _items.Count;
+
+    internal IEnumerable<(ConstantValue Key, NsArray Node)> SaveChildren()
+    {
+        for (int i = 0; i < _items.Count; i++) yield return (ConstantValue.Number(i), _items[i]);
+        foreach ((string name, NsArray node) in _names) yield return (ConstantValue.String(name), node);
+    }
+
     public ConstantValue Value => Scalar.WithArray(this);
 
     public NsArray(ConstantValue scalar, ref MessagePackReader reader) : this(scalar)

@@ -5,7 +5,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using System.Security.Cryptography;
+using NitroSharp.Common;
 using System.Text;
 using System.Text.RegularExpressions;
 using NitroSharp;
@@ -109,7 +109,10 @@ internal static class LegacyNpsInstall
             Resource startup = FindScript(Candidates(beginBytes))
                 ?? throw new FileNotFoundException("Legacy Begin NPS script is missing: " + _sjis.GetString(beginBytes));
             string startupModule = Register(startup);
-            string cache = Path.Combine(writable, "legacy-nps-" + Guid.NewGuid().ToString("N"));
+            // Generated scripts include mask asset paths. Keep those paths stable
+            // across launches so an unchanged install retains its save fingerprint.
+            string installId = Convert.ToHexString(CacheNameHash.HashData(Encoding.UTF8.GetBytes(_root)))[..24];
+            string cache = Path.Combine(writable, "legacy-nps", installId);
             Directory.CreateDirectory(cache);
             _cache = cache;
             presentation = presentation with { TransitionMasks = WriteTransitionMasks(cache, width, height) };
@@ -157,7 +160,7 @@ internal static class LegacyNpsInstall
         {
             if (_modules.TryGetValue(resource.Name, out string? module)) return module;
             if (_modules.Count >= 4096) throw new InvalidDataException("Too many referenced NPS modules.");
-            module = "legacy_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(resource.Name.ToLowerInvariant())))[..24] + ".nss";
+            module = "legacy_" + Convert.ToHexString(CacheNameHash.HashData(Encoding.UTF8.GetBytes(resource.Name.ToLowerInvariant())))[..24] + ".nss";
             _modules.Add(resource.Name, module);
             _pending.Enqueue(resource);
             return module;
@@ -179,7 +182,7 @@ internal static class LegacyNpsInstall
             // The original PNG reader retains palette indices. Their displayed
             // palette colors are irrelevant to the wipe's threshold bytes.
             using Image<Rgba32> mask = ReadIndexedWipeMask(Read(resource));
-            cached = Path.Combine(_cache, "masks", "authored-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(resource.Name)))[..24] + ".png");
+            cached = Path.Combine(_cache, "masks", "authored-" + Convert.ToHexString(CacheNameHash.HashData(Encoding.UTF8.GetBytes(resource.Name)))[..24] + ".png");
             mask.SaveAsPng(cached);
             _wipeMasks.Add(resource.Name, cached);
             return cached;

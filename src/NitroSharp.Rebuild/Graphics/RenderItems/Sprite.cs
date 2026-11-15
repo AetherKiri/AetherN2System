@@ -7,7 +7,7 @@ using Veldrid;
 
 namespace NitroSharp.Graphics;
 
-internal class Sprite : RenderItem
+internal partial class Sprite : RenderItem
 {
     private readonly SpriteTexture _texture;
     private bool _disposed;
@@ -94,7 +94,7 @@ internal enum SpriteTextureKind
     Pooled
 }
 
-internal readonly struct SpriteTexture : IDisposable
+internal readonly partial struct SpriteTexture : IDisposable
 {
     private readonly AssetRef<Texture>? _assetRef;
     private readonly Texture? _texture;

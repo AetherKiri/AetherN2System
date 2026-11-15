@@ -2,11 +2,25 @@
   <PropertyGroup>
     <RepoRootDirectory>$(MSBuildThisFileDirectory)</RepoRootDirectory>
     <BaseIntermediateOutputPath>$(RepoRootDirectory)bin\obj\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <BaseIntermediateOutputPath Condition="'$(NativeRid)' != ''">$(RepoRootDirectory)bin\obj\$(NativeRid)\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="'$(NativeRid)' != ''">$(RepoRootDirectory)bin\$(NativeRid)\$(MSBuildProjectName)\</BaseOutputPath>
     <Authors>sa.exe</Authors>
     <Company>Committee of Zero</Company>
     <PackageVersion>0.1</PackageVersion>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(NativeRid.StartsWith('linux-bionic-')) Or $(NativeRid.StartsWith('android-'))">
+    <IsAndroid>true</IsAndroid>
+    <IsUnix>true</IsUnix>
+    <DefineConstants>$(DefineConstants);ANDROID;UNIX</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$(NativeRid.StartsWith('ios-')) Or $(NativeRid.StartsWith('iossimulator-'))">
+    <IsIOS>true</IsIOS>
+    <IsUnix>true</IsUnix>
+    <DefineConstants>$(DefineConstants);IOS;UNIX</DefineConstants>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Portable)' == 'true' ">

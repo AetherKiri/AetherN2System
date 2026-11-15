@@ -1,21 +1,60 @@
 using System;
+using System.Buffers;
 using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
+using NitroSharp.Common;
+using MessagePack;
 using NitroSharp.NsScript.Primitives;
 using NitroSharp.NsScript.Utilities;
 using ZeroLog;
 
 namespace NitroSharp.NsScript.VM;
 
-[Persistable]
-public readonly partial struct GlobalsDump
+public readonly struct GlobalsDump
 {
     internal (string, ConstantValue)[] Globals { get; init; }
+    internal GlobalArrayAlias[] Aliases { get; init; }
+
+    public GlobalsDump(ref MessagePackReader reader)
+    {
+        int fields = reader.ReadArrayHeader();
+        if (fields is not (1 or 2)) throw new InvalidDataException("Invalid saved globals record.");
+        int count = reader.ReadArrayHeader();
+        if ((uint)count > 32768) throw new InvalidDataException("Invalid saved globals count.");
+        Globals = new (string, ConstantValue)[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (reader.ReadArrayHeader() != 2) throw new InvalidDataException("Invalid saved global.");
+            Globals[i] = (reader.ReadString() ?? throw new InvalidDataException("Invalid global name."), new ConstantValue(ref reader));
+        }
+        count = fields == 2 ? reader.ReadArrayHeader() : 0;
+        if ((uint)count > 32768) throw new InvalidDataException("Invalid saved aliases count.");
+        Aliases = new GlobalArrayAlias[count];
+        for (int i = 0; i < count; i++) Aliases[i] = new GlobalArrayAlias(ref reader);
+    }
+
+    public void Serialize(ref MessagePackWriter writer)
+    {
+        writer.WriteArrayHeader(2);
+        writer.WriteArrayHeader(Globals.Length);
+        foreach ((string name, ConstantValue value) in Globals)
+        {
+            writer.WriteArrayHeader(2);
+            writer.Write(name);
+            value.Serialize(ref writer);
+        }
+        writer.WriteArrayHeader(Aliases?.Length ?? 0);
+        foreach (GlobalArrayAlias alias in Aliases ?? []) alias.Serialize(ref writer);
+    }
 }
+
+[Persistable]
+internal readonly partial record struct GlobalArrayAlias(string Name, string Owner, ConstantValue[] Path);
 
 public sealed class NsScriptVM
 {
@@ -52,37 +91,78 @@ public sealed class NsScriptVM
 
     public void RestoreVariables(GlobalsDump dump)
     {
-        RestoreGlobals(_variables, GlobalsLookup.Variables, dump);
+        RestoreGlobals(dump, flag: false);
     }
 
     public void RestoreFlags(GlobalsDump dump)
     {
-        RestoreGlobals(_flags, GlobalsLookup.Flags, dump);
+        RestoreGlobals(dump, flag: true);
     }
 
-    private static GlobalsDump DumpGlobals(
-        ConstantValue[] table,
-        FrozenDictionary<string, int> lookup)
+    private static GlobalsDump DumpGlobals(ConstantValue[] table, FrozenDictionary<string, int> lookup)
     {
         var globals = new (string, ConstantValue)[lookup.Count];
-        foreach ((string name, int i) in lookup)
+        var aliases = new List<GlobalArrayAlias>();
+        var nodes = new Dictionary<NsArray, (string Name, ConstantValue[] Path)>();
+        foreach ((string name, int i) in lookup.OrderBy(entry => entry.Value))
         {
             globals[i] = (name, table[i]);
+            if (table[i].Array is not { } array) continue;
+            if (nodes.TryGetValue(array, out var existing))
+                aliases.Add(new GlobalArrayAlias(name, existing.Name, existing.Path));
+            else IndexSaveArray(array, name, [], nodes);
         }
-        return new GlobalsDump { Globals = globals };
+        return new GlobalsDump { Globals = globals, Aliases = aliases.ToArray() };
     }
 
-    private static void RestoreGlobals(
-        ConstantValue[] table,
-        FrozenDictionary<string, int> lookup,
-        in GlobalsDump dump)
+    private static void IndexSaveArray(NsArray node, string name, ConstantValue[] path,
+        Dictionary<NsArray, (string Name, ConstantValue[] Path)> nodes)
     {
+        if (!nodes.TryAdd(node, (name, path))) return;
+        if (path.Length >= 128 || nodes.Count > 1_000_000) throw new InvalidDataException("Saved array graph is too complex.");
+        foreach (var child in node.SaveChildren()) IndexSaveArray(child.Node, name, [.. path, child.Key], nodes);
+    }
+
+    public ConstantValue GetHostVariable(string name)
+        => GlobalsLookup.Variables.TryGetValue(name, out int index) ? _variables[index] : ConstantValue.Null;
+
+    public ConstantValue GetHostFlag(string name)
+        => GlobalsLookup.Flags.TryGetValue(name, out int index) ? _flags[index] : ConstantValue.Null;
+
+    public void SetHostFlag(string name, ConstantValue value)
+    {
+        int index = EnsureSaveGlobal(name, flag: true);
+        _flags[index] = value;
+    }
+
+    private int EnsureSaveGlobal(string name, bool flag)
+    {
+        if (name.Length is 0 or > 4096) throw new InvalidDataException("Invalid saved global name.");
+        var lookup = flag ? GlobalsLookup.Flags : GlobalsLookup.Variables;
+        if (lookup.TryGetValue(name, out int index)) return index;
+        if (lookup.Count > short.MaxValue - 2) throw new InvalidDataException("Too many saved globals.");
+        index = lookup.Count;
+        UpdateGlobals(GlobalsLookup.WithGlobal(name, flag));
+        return index;
+    }
+
+    private void RestoreGlobals(in GlobalsDump dump, bool flag)
+    {
+        Array.Clear(flag ? _flags : _variables);
         foreach ((string name, ConstantValue val) in dump.Globals)
         {
-            if (lookup.TryGetValue(name, out int index))
-            {
-                table[index] = val;
-            }
+            int index = EnsureSaveGlobal(name, flag);
+            if (flag) _flags[index] = val;
+            else _variables[index] = val;
+        }
+        foreach (GlobalArrayAlias alias in dump.Aliases ?? [])
+        {
+            int target = EnsureSaveGlobal(alias.Name, flag), owner = EnsureSaveGlobal(alias.Owner, flag);
+            ConstantValue[] table = flag ? _flags : _variables;
+            NsArray node = table[owner].Array ?? throw new InvalidDataException("Missing saved array owner.");
+            if (alias.Path.Length > 128) throw new InvalidDataException("Invalid saved array path.");
+            foreach (ConstantValue key in alias.Path) node = node.Get(key);
+            table[target] = table[target].WithArray(node);
         }
     }
 
@@ -104,6 +184,266 @@ public sealed class NsScriptVM
         }
 
         return module;
+    }
+
+    public NsxModule GetSaveModule(string moduleName) => GetModule(moduleName);
+
+    public void WriteSaveModule(BinaryWriter writer, NsxModule module)
+    {
+        writer.Write(module.Name);
+        writer.Write(module.SourceScopes.Length);
+        foreach (string scope in module.SourceScopes)
+        {
+            writer.Write(scope);
+            writer.Write(HashSaveSource(scope));
+        }
+        byte[] hash;
+        bool source;
+        try { hash = HashSaveSource(module.Name); source = true; }
+        catch (FileNotFoundException) { hash = CacheNameHash.HashData(module.Code); source = false; }
+        catch (DirectoryNotFoundException) { hash = CacheNameHash.HashData(module.Code); source = false; }
+        writer.Write(source);
+        writer.Write(hash);
+    }
+
+    public NsxModule ReadSaveModule(BinaryReader reader)
+    {
+        string name = ReadSaveName(reader);
+        int count = ReadSaveCount(reader, 256);
+        var scopes = new string[count];
+        for (int i = 0; i < count; i++)
+        {
+            scopes[i] = ReadSaveName(reader);
+            VerifySaveHash(reader, HashSaveSource(scopes[i]));
+        }
+        bool source = reader.ReadBoolean();
+        byte[] hash = reader.ReadBytes(32);
+        if (hash.Length != 32) throw new EndOfStreamException();
+        NsxModule result;
+        if (count == 0) result = GetModule(name);
+        else
+        {
+            string key = "save\0" + string.Join('\0', scopes);
+            if (!_scopedSceneModules.TryGetValue(key, out NsxModule? root))
+            {
+                var compiled = _moduleLocator.CompileModuleIfMissing(scopes[0], GlobalsLookup, _loadedModules, scopes[1..])
+                    ?? throw new InvalidDataException("The saved scene's source scope cannot be restored.");
+                UpdateGlobals(compiled.Globals);
+                var modules = new Dictionary<string, NsxModule>();
+                foreach ((string moduleName, byte[] bytes) in compiled.Modules)
+                    modules.Add(moduleName, NsxModule.LoadModule(new MemoryStream(bytes), moduleName));
+                foreach (NsxModule module in modules.Values)
+                {
+                    module.SourceScopes = scopes;
+                    module.ScopedModules = modules;
+                }
+                if (!modules.TryGetValue(scopes[0], out root))
+                    throw new InvalidDataException("The saved scene root was not found.");
+                _scopedSceneModules.Add(key, root);
+            }
+            result = root.ScopedModules is { } savedModules && savedModules.TryGetValue(name, out NsxModule? moduleResult)
+                ? moduleResult : throw new InvalidDataException("The saved scene module was not found.");
+        }
+        byte[] actual = source ? HashSaveSource(name) : CacheNameHash.HashData(result.Code);
+        if (!hash.AsSpan().SequenceEqual(actual)) throw new InvalidDataException("The saved script has changed.");
+        return result;
+    }
+
+    private byte[] HashSaveSource(string name)
+    {
+        using SourceMappingScope mapping = _moduleLocator.BeginSourceMapping();
+        return CacheNameHash.HashData(Encoding.UTF8.GetBytes(mapping.GetSourceText(name).Source));
+    }
+
+    private static void VerifySaveHash(BinaryReader reader, byte[] actual)
+    {
+        byte[] saved = reader.ReadBytes(32);
+        if (saved.Length != 32) throw new EndOfStreamException();
+        if (!saved.AsSpan().SequenceEqual(actual)) throw new InvalidDataException("The saved script scope has changed.");
+    }
+
+    private static string ReadSaveName(BinaryReader reader)
+    {
+        string name = reader.ReadString();
+        if (name.Length is 0 or > 4096) throw new InvalidDataException("Invalid saved name.");
+        return name;
+    }
+
+    // Saves retain bytecode offsets, so callers must verify the game/save format before restoring.
+    public void WriteThreadState(BinaryWriter writer, in NsScriptThreadState state)
+    {
+        writer.Write(1);
+        writer.Write(state.CallFrameStack.Count);
+        foreach (CallFrame frame in state.CallFrameStack.AsSpan())
+        {
+            WriteSaveModule(writer, frame.Module);
+            writer.Write(frame.SubroutineIndex);
+            writer.Write(frame.ProgramCounter);
+            writer.Write(frame.EndPosition.HasValue);
+            if (frame.EndPosition is { } end) writer.Write(end);
+            writer.Write(frame.HasCallScope);
+        }
+        var arrayReferences = new Dictionary<NsArray, (string Name, ConstantValue[] Path)>();
+        foreach ((string name, int index) in GlobalsLookup.Variables.OrderBy(entry => entry.Value))
+            if (_variables[index].Array is { } array) IndexSaveArray(array, "$" + name, [], arrayReferences);
+        foreach ((string name, int index) in GlobalsLookup.Flags.OrderBy(entry => entry.Value))
+            if (_flags[index].Array is { } array) IndexSaveArray(array, "#" + name, [], arrayReferences);
+        writer.Write(state.EvalStack.Count);
+        foreach (ConstantValue value in state.EvalStack.AsSpan())
+        {
+            WriteSaveValue(writer, value);
+            bool reference = value.GetSlotInfo(out short slot);
+            writer.Write(reference);
+            if (reference)
+            {
+                bool flag = slot < 0;
+                int index = flag ? -slot - 2 : slot;
+                string name = (flag ? GlobalsLookup.Flags : GlobalsLookup.Variables)
+                    .First(entry => entry.Value == index).Key;
+                writer.Write(flag);
+                writer.Write(name);
+            }
+            bool arrayReference = value.Array is { } valueArray && arrayReferences.ContainsKey(valueArray);
+            writer.Write(arrayReference);
+            if (arrayReference)
+            {
+                var target = arrayReferences[value.Array!];
+                writer.Write(target.Name);
+                writer.Write(target.Path.Length);
+                foreach (ConstantValue key in target.Path) WriteSaveValue(writer, key);
+            }
+        }
+        writer.Write(state.Yielded);
+        writer.Write(state.SelectResult);
+        // Instruction-budget yields can interrupt a curve literal between its segments.
+        WriteSaveValue(writer, ConstantValue.BezierCurve(new CompositeBezier(_bezierSegmentStack.ToImmutableArray())));
+    }
+
+    public NsScriptThreadState ReadThreadState(BinaryReader reader)
+    {
+        if (reader.ReadInt32() != 1) throw new InvalidDataException("Unsupported VM thread save version.");
+        var state = new NsScriptThreadState
+        {
+            CallFrameStack = new ValueStack<CallFrame>(4),
+            EvalStack = new ValueStack<ConstantValue>(4)
+        };
+        int frames = ReadSaveCount(reader, 4096);
+        for (int i = 0; i < frames; i++)
+        {
+            NsxModule module = ReadSaveModule(reader);
+            ushort subroutine = reader.ReadUInt16();
+            Subroutine routine;
+            try { routine = module.GetSubroutine(subroutine); }
+            catch (IndexOutOfRangeException exception) { throw new InvalidDataException("Invalid saved subroutine.", exception); }
+            int pc = reader.ReadInt32();
+            int? end = reader.ReadBoolean() ? reader.ReadInt32() : null;
+            if (pc < routine.BytecodeStart || pc > module.Code.Length || (pc == module.Code.Length && end != pc)
+                || end is { } limit && (limit < pc || limit > module.Code.Length))
+                throw new InvalidDataException("Invalid saved bytecode position.");
+            state.CallFrameStack.Push(new CallFrame(module, subroutine, pc)
+            {
+                EndPosition = end,
+                HasCallScope = reader.ReadBoolean()
+            });
+        }
+        int values = ReadSaveCount(reader, 1_000_000);
+        for (int i = 0; i < values; i++)
+        {
+            ConstantValue value = ReadSaveValue(reader);
+            if (reader.ReadBoolean())
+            {
+                bool flag = reader.ReadBoolean();
+                int index = EnsureSaveGlobal(ReadSaveName(reader), flag);
+                short slot = checked((short)(flag ? -index - 2 : index));
+                ConstantValue global = flag ? _flags[index] : _variables[index];
+                // Preserve array aliasing between an evaluated reference and its restored global.
+                if (value.Array is not null && global.Array is { } array) value = value.WithArray(array);
+                value = value.WithSlot(slot);
+            }
+            if (reader.ReadBoolean())
+            {
+                string owner = ReadSaveName(reader);
+                if (owner[0] is not ('$' or '#')) throw new InvalidDataException("Invalid saved array owner.");
+                bool flag = owner[0] == '#';
+                int index = EnsureSaveGlobal(owner[1..], flag);
+                NsArray node = (flag ? _flags[index] : _variables[index]).Array
+                    ?? throw new InvalidDataException("Missing saved array reference.");
+                int keys = ReadSaveCount(reader, 128);
+                for (int key = 0; key < keys; key++) node = node.Get(ReadSaveValue(reader));
+                bool hasSlot = value.GetSlotInfo(out short slot);
+                value = value.WithArray(node);
+                if (hasSlot) value = value.WithSlot(slot);
+            }
+            state.EvalStack.Push(value);
+        }
+        state.Yielded = reader.ReadBoolean();
+        state.SelectResult = reader.ReadBoolean();
+        ConstantValue curve = ReadSaveValue(reader);
+        if (curve.Type != BuiltInType.BezierCurve) throw new InvalidDataException("Invalid saved curve state.");
+        RestoreTransientSaveState(curve.AsBezierCurve()!.Value);
+        return state;
+    }
+
+    public CompositeBezier CaptureTransientSaveState() => new(_bezierSegmentStack.ToImmutableArray());
+
+    public void RestoreTransientSaveState(CompositeBezier curve)
+    {
+        _bezierSegmentStack.Clear();
+        for (int i = curve.Segments.Length - 1; i >= 0; i--) _bezierSegmentStack.Push(curve.Segments[i]);
+    }
+
+    private static int ReadSaveCount(BinaryReader reader, int maximum)
+    {
+        int count = reader.ReadInt32();
+        if ((uint)count > maximum) throw new InvalidDataException("Invalid saved collection size.");
+        return count;
+    }
+
+    private static void WriteSaveValue(BinaryWriter writer, ConstantValue value)
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        var messageWriter = new MessagePackWriter(buffer);
+        value.Serialize(ref messageWriter);
+        messageWriter.Flush();
+        writer.Write(buffer.WrittenCount);
+        writer.Write(buffer.WrittenSpan);
+    }
+
+    private static ConstantValue ReadSaveValue(BinaryReader reader)
+    {
+        int size = ReadSaveCount(reader, 16 * 1024 * 1024);
+        byte[] bytes = reader.ReadBytes(size);
+        if (bytes.Length != size) throw new EndOfStreamException();
+        var validation = new MessagePackReader(bytes);
+        int budget = 1_000_000;
+        ValidateSaveValue(ref validation, 0, ref budget);
+        if (!validation.End) throw new InvalidDataException("Trailing saved value data.");
+        var messageReader = new MessagePackReader(bytes);
+        var value = new ConstantValue(ref messageReader);
+        if (!messageReader.End) throw new InvalidDataException("Trailing saved value data.");
+        return value;
+    }
+
+    private static void ValidateSaveValue(ref MessagePackReader reader, int depth, ref int budget)
+    {
+        if (depth > 128 || --budget < 0) throw new InvalidDataException("Saved value is too complex.");
+        int children;
+        switch (reader.NextMessagePackType)
+        {
+            case MessagePackType.Array:
+                children = reader.ReadArrayHeader();
+                break;
+            case MessagePackType.Map:
+                int entries = reader.ReadMapHeader();
+                if (entries > budget / 2) throw new InvalidDataException("Saved value map is too large.");
+                children = entries * 2;
+                break;
+            default:
+                reader.Skip();
+                return;
+        }
+        if (children > budget) throw new InvalidDataException("Saved value array is too large.");
+        for (int i = 0; i < children; i++) ValidateSaveValue(ref reader, depth + 1, ref budget);
     }
 
     public NsScriptThreadState? CreateThread(string moduleName, string symbol)

@@ -5,7 +5,7 @@ using NitroSharp.NsScript;
 
 namespace NitroSharp;
 
-internal sealed class ChoiceEntity(EntityName name, Entity? parent, bool preserveOpacity = false) : Entity(name, parent)
+internal sealed partial class ChoiceEntity(EntityName name, Entity? parent, bool preserveOpacity = false) : Entity(name, parent)
 {
     private readonly Dictionary<NsFocusDirection, ChoiceEntity> _nextFocus = [];
 

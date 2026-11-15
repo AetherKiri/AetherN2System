@@ -227,6 +227,33 @@ public sealed class LegacyNpsInstallTests : IDisposable
     }
 
     [Fact]
+    public void RepeatedPreparationKeepsGeneratedScriptsAndAuthoredMaskPathsStable()
+    {
+        Write("game.ini", _sjis.GetBytes("Name=fixture\nBegin=start.nps\n"));
+        Write("sys.ini", _sjis.GetBytes("width=80\nheight=60\n"));
+        Write("data/right.png", IndexedMask());
+        Write("script/start.nps", _sjis.GetBytes("<WIPE EFFECT=right TIME=5><BOX TYPE=9>Checkpoint<k>"));
+        string writable = Path.Combine(_root, "cache");
+        var first = LegacyNpsInstall.Prepare(_root, writable);
+        var sources = Directory.GetFiles(first.ScriptRoot, "*.nss")
+            .ToDictionary(path => Path.GetFileName(path)!, File.ReadAllBytes);
+        string firstSource = File.ReadAllText(Path.Combine(first.ScriptRoot, first.StartupScript));
+        Assert.Contains("DrawLegacyTransition(", firstSource);
+        string mask = Assert.Single(Directory.GetFiles(Path.Combine(first.ScriptRoot, "masks"), "authored-*.png"));
+        Assert.Contains(mask, firstSource);
+        byte[] maskBytes = File.ReadAllBytes(mask);
+
+        var second = LegacyNpsInstall.Prepare(_root, writable);
+
+        Assert.Equal(first.ScriptRoot, second.ScriptRoot);
+        Assert.Equal(first.StartupScript, second.StartupScript);
+        Assert.Equal(sources.Count, Directory.GetFiles(second.ScriptRoot, "*.nss").Length);
+        foreach (var source in sources)
+            Assert.Equal(source.Value, File.ReadAllBytes(Path.Combine(second.ScriptRoot, source.Key!)));
+        Assert.Equal(maskBytes, File.ReadAllBytes(mask));
+    }
+
+    [Fact]
     public void PackedPresentationControlsNarrativeAreaFrameAndBustupAlignment()
     {
         WritePak("data.pak", new Dictionary<string, byte[]> {

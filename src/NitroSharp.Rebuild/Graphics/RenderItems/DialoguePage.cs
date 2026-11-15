@@ -8,12 +8,12 @@ using NitroSharp.Text;
 
 namespace NitroSharp.Graphics;
 
-internal sealed class DialoguePage : RenderItem
+internal sealed partial class DialoguePage : RenderItem
 {
     private readonly DialogueBlockToken _token;
     private readonly CompiledDialogueBlock _block;
     private readonly TextLayout _layout;
-    private readonly bool _verticalGlyphs;
+    private bool _verticalGlyphs;
     private readonly Queue<DialogueSegment> _segments = new();
     private readonly Vector4 _margin = new(0, 10, 0, 0);
     private int _partIndex;
@@ -34,6 +34,7 @@ internal sealed class DialoguePage : RenderItem
     {
         // Loading prepares a page; the script enters it after its window is ready.
         base.Request(NsEntityAction.Disable);
+        SaveLineSpacing = lineSpacing;
         _token = token;
         _verticalGlyphs = parent.Process.FontSettings.VerticalGlyphs;
         _block = token.Module.GetSubroutine(token.SubroutineIndex).DialogueBlocks[token.Offset];
@@ -156,7 +157,9 @@ internal sealed class DialoguePage : RenderItem
                         _layout.Clear();
                         _clearBeforeMarkup = false;
                     }
-                    Dialogue dialogue = Dialogue.Parse(markup.GetText(_token.Module), Process.FontSettings);
+                    string dialogueMarkup = markup.GetText(_token.Module);
+                    ctx.VM.SystemVariables.LastText = ConstantValue.String(dialogueMarkup);
+                    Dialogue dialogue = Dialogue.Parse(dialogueMarkup, Process.FontSettings);
                     foreach (DialogueSegment segment in dialogue.Segments)
                     {
                         _segments.Enqueue(segment);

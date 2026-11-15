@@ -8,7 +8,7 @@ using Veldrid;
 
 namespace NitroSharp.Graphics;
 
-internal sealed class Video : RenderItem
+internal sealed partial class Video : RenderItem
 {
     private readonly GraphicsDevice _device;
     private readonly MediaStream _media;
@@ -25,6 +25,7 @@ internal sealed class Video : RenderItem
         GraphicsDevice device, AudioContext audio, bool loop, bool alpha) : base(name, parent, priority)
     {
         _device = device;
+        SaveLoop = loop;
         _alpha = alpha;
         _audio = audio.RentAudioSource();
         try
@@ -98,6 +99,11 @@ internal sealed class Video : RenderItem
         _uploadPending = true;
         _hasFrame = true;
         PresentedFrames++;
+        if (_restorePauseAfterFrame)
+        {
+            _restorePauseAfterFrame = false;
+            _media.Pause();
+        }
     }
 
     public override void Render(GameContext ctx)

@@ -218,13 +218,39 @@ public sealed class LegacyNpsTranslatorTests
     {
         var translation = LegacyNpsTranslator.Translate("<SYSTEM MENU=#006><SYSTEM CMD=savemode MODE=TRUE><SYSTEM CMD=timerclear><BOX TYPE=9>Continued<k>", "system.nps");
         var vm = Execute(translation, new SceneBuiltins());
-        Assert.Equal(3, translation.Diagnostics.Count(value => value.Contains("optional SYSTEM")));
-        Assert.Contains(translation.Diagnostics, value => value.Contains("host menu controls are not connected"));
+        Assert.Equal(2, translation.Diagnostics.Count(value => value.Contains("optional SYSTEM")));
+        Assert.False(vm.SystemVariables.MenuLock.AsBool());
         Assert.Contains(translation.Diagnostics, value => value.Contains("host storage is not connected"));
         Assert.Contains(translation.Diagnostics, value => value.Contains("host play-time tracking is not connected"));
         Assert.True(vm.DumpVariables().Globals.Single(pair => pair.Item1 == "legacy_system_suppress_choice_autosave").Item2.AsBool());
         Assert.DoesNotContain("legacy_system_save_enabled", translation.Source);
         Assert.DoesNotContain("LegacyUnsupported", translation.Source);
+    }
+
+    [Theory]
+    [InlineData("#FFFFFFFF", true, true, true)]
+    [InlineData("#7E2", false, true, false)]
+    [InlineData("#006", false, true, true)]
+    [InlineData("#000", false, false, false)]
+    public void LegacyHostMenusRespectTheAuthoredFullLockAndReturnAfterCancellation(string mask, bool locked, bool saveLocked, bool loadLocked)
+    {
+        var builtins = new SaveMenuBuiltins();
+        var translation = LegacyNpsTranslator.Translate($"<SYSTEM MENU={mask}><LOAD><SAVE><CALC WORKNAME=after OPERATOR=1>", "save-menu.nps");
+        var vm = Execute(translation, builtins);
+        Assert.Equal(new[] { false, true }, builtins.Opened);
+        Assert.Equal(locked, vm.SystemVariables.MenuLock.AsBool());
+        Assert.Equal(saveLocked, vm.DumpVariables().Globals.Single(pair => pair.Item1 == "SYSTEM_save_lock").Item2.AsBool());
+        Assert.Equal(loadLocked, vm.DumpVariables().Globals.Single(pair => pair.Item1 == "SYSTEM_load_lock").Item2.AsBool());
+        Assert.Equal(1, vm.DumpVariables().Globals.Single(pair => pair.Item1 == "legacy_work_local_0_AFTER").Item2.AsNumber());
+        Assert.DoesNotContain("LegacyUnsupported", translation.Source);
+        Assert.Empty(translation.Diagnostics);
+    }
+
+    private sealed class SaveMenuBuiltins : BuiltInFunctions
+    {
+        public readonly List<bool> Opened = [];
+        protected override void NotImplemented(string functionName = "") { }
+        public override void OpenSaveMenu(bool saving) => Opened.Add(saving);
     }
 
     [Theory]

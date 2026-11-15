@@ -8,6 +8,20 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <IlcOptimizationPreference>Speed</IlcOptimizationPreference>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(IsAndroid)' == 'true' Or '$(IsIOS)' == 'true'">
+    <PublishAotUsingRuntimePack>true</PublishAotUsingRuntimePack>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(IsIOS)' == 'true'">
+    <NativeLib>Static</NativeLib>
+    <IlcExportUnmanagedEntrypoints>true</IlcExportUnmanagedEntrypoints>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(IsIOS)' == 'true'">
+    <DirectPInvoke Include="libfreetype;libopenal;libavcodec.62;libavformat.62;libavutil.60;libswresample.6;libswscale.9" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(IsAndroid)' == 'true' Or '$(IsIOS)' == 'true'">
+    <EmbeddedResource Include="../fonts/*.ttf" LogicalName="AetherN2System.Fonts.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(AetherRuntimeCjkFontPath)" Condition="'$(AetherRuntimeCjkFontPath)' != ''" LogicalName="AetherN2System.Fonts.aetherkiri-runtime-cjk.otf" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
     <ProjectReference Include="../src/NitroSharp.Rebuild/NitroSharp.Rebuild.csproj" />

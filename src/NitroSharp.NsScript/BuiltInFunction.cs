@@ -138,5 +138,10 @@ public enum BuiltInFunction : byte
     WaitFrameAnimation,
     DrawLegacyTransition,
     FinishFrameAnimation,
-    SetTextOrientation
+    SetTextOrientation,
+
+    // Keep host extensions outside the original sequential function IDs.
+    ReadFile = 240,
+    WriteFile = 241,
+    OpenSaveMenu = 242
 }

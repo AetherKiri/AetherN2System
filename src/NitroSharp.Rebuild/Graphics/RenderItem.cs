@@ -20,11 +20,11 @@ internal readonly record struct RenderItemKey(int Priority, int Id) : IComparabl
     }
 }
 
-internal abstract class RenderItem : Entity, IComparable<RenderItem>
+internal abstract partial class RenderItem : Entity, IComparable<RenderItem>
 {
     private static int s_lastId;
 
-    private readonly RenderItemKey _key;
+    private RenderItemKey _key;
     private RgbaFloat _color = RgbaFloat.White;
     private Transform _transform = Transform.Default;
     private OpacityAnimation? _fadeAnimation;

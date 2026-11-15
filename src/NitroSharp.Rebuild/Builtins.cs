@@ -19,7 +19,7 @@ using ZeroLog;
 
 namespace NitroSharp;
 
-internal sealed class Builtins : BuiltInFunctions
+internal sealed partial class Builtins : BuiltInFunctions
 {
     private static readonly string[] s_mouseStates = ["MouseUsual", "MouseClick", "MouseOver", "MouseLeave"];
 
@@ -191,7 +191,7 @@ internal sealed class Builtins : BuiltInFunctions
         Stream input = _ctx.Content.TryOpenStream(source)
             ?? throw new FileNotFoundException("Movie file could not be opened.", source);
         var video = new Video(name, parent, priority, input, _ctx.RenderContext.GraphicsDevice,
-            _ctx.AudioContext, loop, alpha);
+            _ctx.AudioContext, loop, alpha) { SourcePath = source };
         try { video.WithPosition(_ctx.RenderContext, x, y); video.Start(); }
         catch { video.Dispose(); throw; }
         _world.AddEntity(video);
@@ -555,7 +555,20 @@ internal sealed class Builtins : BuiltInFunctions
         if (!ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
             return;
 
-        using (Stream? stream = OpenAudioStream(fileName))
+        string sourcePath = fileName;
+        if (!Path.HasExtension(sourcePath))
+        {
+            using Stream? direct = _ctx.Content.TryOpenStream(sourcePath);
+            if (direct is null)
+            foreach (string extension in new[] { ".ogg", ".wav", ".mp3", ".flac", ".opus" })
+            {
+                using Stream? candidate = _ctx.Content.TryOpenStream(fileName + extension);
+                if (candidate is null) continue;
+                sourcePath = fileName + extension;
+                break;
+            }
+        }
+        using (Stream? stream = OpenAudioStream(sourcePath))
         {
             if (stream is null)
             {
@@ -567,12 +580,12 @@ internal sealed class Builtins : BuiltInFunctions
         _world.AddEntity(new AudioEntity(
             name,
             parent,
-            () => OpenAudioStream(fileName)
-                ?? throw new FileNotFoundException("Audio file could not be opened.", fileName),
+            () => OpenAudioStream(sourcePath)
+                ?? throw new FileNotFoundException("Audio file could not be opened.", sourcePath),
             _ctx.AudioContext,
             kind,
             _ctx.VM
-        ));
+        ) { SourcePath = sourcePath });
     }
 
     private Stream? OpenAudioStream(string fileName)

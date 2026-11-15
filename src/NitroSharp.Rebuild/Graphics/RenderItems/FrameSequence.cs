@@ -7,7 +7,7 @@ using NitroSharp.NsScript;
 
 namespace NitroSharp.Graphics;
 
-internal sealed class FrameSequence : RenderItem
+internal sealed partial class FrameSequence : RenderItem
 {
     private readonly SpriteTexture[] _frames;
     private readonly string[] _frameSources;

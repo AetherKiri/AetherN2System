@@ -22,7 +22,11 @@ internal static unsafe class NativeDependencies
     [DllImport("/usr/lib/libSystem.B.dylib", EntryPoint = "dladdr")]
     private static extern int MacDlAddr(nint address, out DlInfo info);
 
+#if ANDROID
+    [DllImport("libdl.so", EntryPoint = "dladdr")]
+#else
     [DllImport("libdl.so.2", EntryPoint = "dladdr")]
+#endif
     private static extern int LinuxDlAddr(nint address, out DlInfo info);
 
     [DllImport("kernel32", EntryPoint = "GetModuleHandleExW", CharSet = CharSet.Unicode)]
@@ -31,8 +35,9 @@ internal static unsafe class NativeDependencies
     [DllImport("kernel32", EntryPoint = "GetModuleFileNameW", CharSet = CharSet.Unicode)]
     private static extern uint GetModuleFileName(nint module, char* path, uint size);
 
-    public static void Initialize()
+    public static void Initialize(string writable)
     {
+#if !IOS
         nint address = (nint)(delegate* unmanaged[Cdecl]<uint>)&Exports.Version;
         if (OperatingSystem.IsWindows())
         {
@@ -57,10 +62,49 @@ internal static unsafe class NativeDependencies
         NativeLibrary.SetDllImportResolver(typeof(FreeTypeBindings.FT).Assembly, Resolve);
         NativeLibrary.SetDllImportResolver(typeof(OpenAL.NativeLib).Assembly, Resolve);
         NativeLibrary.SetDllImportResolver(typeof(FFmpeg.AutoGen.ffmpeg).Assembly, Resolve);
+#endif
+#if ANDROID || IOS
+        // APK native-library directories cannot carry arbitrary font files. Keep
+        // the same font assets available to both embedded mobile hosts.
+        string assets = Path.Combine(writable, "n2system-runtime");
+        string fonts = Path.Combine(assets, "Fonts");
+        Directory.CreateDirectory(fonts);
+        Assembly host = typeof(NativeDependencies).Assembly;
+        const string prefix = "AetherN2System.Fonts.";
+        foreach (string resource in host.GetManifestResourceNames())
+        {
+            if (!resource.StartsWith(prefix, StringComparison.Ordinal))
+                continue;
+            using Stream source = host.GetManifestResourceStream(resource)!;
+            string destination = Path.Combine(fonts, resource[prefix.Length..]);
+            if (File.Exists(destination) && new FileInfo(destination).Length == source.Length)
+                continue;
+            string temporary = destination + ".tmp";
+            using (FileStream output = File.Create(temporary))
+                source.CopyTo(output);
+            File.Move(temporary, destination, overwrite: true);
+        }
+        NitroSharp.GameContext.HostAssetsDirectory = assets;
+#endif
     }
 
     private static nint Resolve(string name, Assembly assembly, DllImportSearchPath? path)
     {
+#if ANDROID
+        string library = assembly == typeof(FFmpeg.AutoGen.ffmpeg).Assembly
+            ? "libaether_n2system_media.so"
+            : assembly == typeof(FreeTypeBindings.FT).Assembly
+                ? "libaether_n2system_freetype.so"
+                : "libaether_n2system_openal.so";
+        // Resolve relative to the extracted host image first, and also support
+        // Android's APK linker namespace when libraries are loaded in place.
+        string fullPath = Path.Combine(DirectoryPath, library);
+        if (File.Exists(fullPath))
+            return NativeLibrary.Load(fullPath);
+        return NativeLibrary.TryLoad(fullPath, out nint androidLibrary)
+            ? androidLibrary
+            : NativeLibrary.Load(library);
+#else
         if (assembly == typeof(FFmpeg.AutoGen.ffmpeg).Assembly)
         {
             string mediaName = OperatingSystem.IsWindows() ? "aether_n2system_media.dll"
@@ -92,5 +136,6 @@ internal static unsafe class NativeDependencies
         )
             return systemOpenAL;
         return 0;
+#endif
     }
 }

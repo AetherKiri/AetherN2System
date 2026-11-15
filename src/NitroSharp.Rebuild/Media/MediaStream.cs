@@ -19,10 +19,10 @@ namespace NitroSharp.Media
 {
     internal sealed record LoopRegion(TimeSpan Start, TimeSpan End);
 
-    internal sealed class MediaStream : IDisposable, System.IAsyncDisposable
+    internal sealed partial class MediaStream : IDisposable, System.IAsyncDisposable
     {
         private const int IoBufferSize = 4096;
-        private static readonly int ErrorEAgain = OperatingSystem.IsMacOS() ? -35 : -11;
+        private static readonly int ErrorEAgain = OperatingSystem.IsMacOS() || OperatingSystem.IsIOS() ? -35 : -11;
 
         private const double SyncThresholdMin = 0.04;
         private const double SyncThresholdMax = 0.1;
@@ -397,6 +397,7 @@ namespace NitroSharp.Media
             _combinedTask = Task.WhenAll(tasks);
             _videoClock = new Clock(_video, _timer, _unpauseSignal);
             _externalClock = new Clock(null, _timer, _unpauseSignal);
+            if (_savedPositionOffset > 0) _externalClock.Set(_savedPositionOffset, 0);
             _timer.Start();
         }
 
@@ -539,7 +540,7 @@ namespace NitroSharp.Media
         {
             return _video is not null
                 ? _externalClock.Get()
-                : _audioSource!.SecondsElapsed;
+                : _savedPositionOffset + _audioSource!.SecondsElapsed;
         }
 
         private void Seek(TimeSpan target)

@@ -1,10 +1,10 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
 using NitroSharp.Common;
 using NitroSharp.NsScript;
 
 namespace NitroSharp;
 
-internal sealed class AliasMap : EntityScope
+internal sealed partial class AliasMap : EntityScope
 {
     private readonly Process _process;
     private readonly Dictionary<EntityAlias, Entity> _aliases = new();

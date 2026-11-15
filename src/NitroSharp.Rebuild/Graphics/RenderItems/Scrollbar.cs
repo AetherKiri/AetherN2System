@@ -4,7 +4,7 @@ using NitroSharp.NsScript;
 
 namespace NitroSharp.Graphics;
 
-internal sealed class Scrollbar : Sprite
+internal sealed partial class Scrollbar : Sprite
 {
     private readonly Vector2 _start;
     private readonly Vector2 _end;

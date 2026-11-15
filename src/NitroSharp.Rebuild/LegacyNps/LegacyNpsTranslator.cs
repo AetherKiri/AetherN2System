@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
+using NitroSharp.Common;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -70,7 +70,7 @@ internal static class LegacyNpsTranslator
         {
             _name = name; _width = width; _height = height; _presentation = presentation;
             if (width <= 0 || height <= 0) throw new ArgumentOutOfRangeException(nameof(width));
-            _prefix = "legacy_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..12] + "_";
+            _prefix = "legacy_" + Convert.ToHexString(CacheNameHash.HashData(Encoding.UTF8.GetBytes(name)))[..12] + "_";
             _module = module ?? (path => Path.ChangeExtension(path.Replace('\\', '/'), ".nss"));
             _asset = asset ?? ((kind, path) => (kind == "glass" ? "cg" : kind) + "/" + path.Replace('\\', '/')
                 + (Path.HasExtension(path) ? "" : kind is "sound" or "voice" ? ".ogg" : kind == "movie" ? ".mpg" : ".png"));
@@ -292,6 +292,12 @@ internal static class LegacyNpsTranslator
                         Jump(choice.Attributes.GetValueOrDefault("HREF", ""), choice); Line("}");
                     }
                     Line("}"); break;
+                case "SAVE":
+                    Line("OpenSaveMenu(true);");
+                    break;
+                case "LOAD":
+                    Line("OpenSaveMenu(false);");
+                    break;
                 case "SYSTEM":
                     if (A("INIT").Equals("TRUE", StringComparison.OrdinalIgnoreCase))
                     {
@@ -300,7 +306,14 @@ internal static class LegacyNpsTranslator
                     else if (A("MENU").Length > 0)
                     {
                         Line($"VariableValue($, {Q(LocalKey("menu_mask"))}, {Q(A("MENU"))});");
-                        _diagnostics.Add($"{_name}:{token.Line}: optional SYSTEM MENU capability is unsupported: authored mask is retained, but host menu controls are not connected.");
+                        string menuMask = A("MENU").TrimStart('#');
+                        if (!uint.TryParse(menuMask, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint systemMenuMask))
+                            throw new FormatException("SYSTEM MENU mask");
+                        Line($"$SYSTEM_menu_lock = {(systemMenuMask == uint.MaxValue ? "true" : "false")};");
+                        Line($"$SYSTEM_save_lock = {((systemMenuMask & 2) != 0 ? "true" : "false")};");
+                        Line($"$SYSTEM_load_lock = {((systemMenuMask & 4) != 0 ? "true" : "false")};");
+                        Line($"$SYSTEM_skip_lock = {((systemMenuMask & 0x400) != 0 ? "true" : "false")};");
+                        Line($"$SYSTEM_text_auto_lock = {((systemMenuMask & 0x80) != 0 ? "true" : "false")};");
                     }
                     else if (A("CMD").Equals("savemode", StringComparison.OrdinalIgnoreCase))
                     {

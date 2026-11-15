@@ -4,7 +4,7 @@ namespace NitroSharp.Text;
 
 // Layout is performed once when a segment is appended. Subsequent frames only
 // change the opacity buffer consumed by TextRenderContext.
-internal sealed class DialogueTextAnimation
+internal sealed partial class DialogueTextAnimation
 {
     private readonly TextLayout _layout;
     private readonly int _start;

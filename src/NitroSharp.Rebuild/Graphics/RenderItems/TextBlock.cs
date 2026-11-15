@@ -4,7 +4,7 @@ using NitroSharp.Text;
 
 namespace NitroSharp.Graphics;
 
-internal sealed class TextBlock : RenderItem
+internal sealed partial class TextBlock : RenderItem
 {
     private readonly TextLayout _layout;
     private readonly Vector4 _margin;
@@ -14,6 +14,9 @@ internal sealed class TextBlock : RenderItem
         TextRenderContext ctx, DesignSizeU maxBounds, FontSettings fontSettings, Vector4 margin)
         : base(name, parent, priority)
     {
+        SaveMarkup = markup;
+        SaveFontSettings = fontSettings;
+        SaveMaxBounds = maxBounds;
         _margin = margin;
         _verticalGlyphs = fontSettings.VerticalGlyphs;
         _layout = new TextLayout(maxBounds.Width, maxBounds.Height,

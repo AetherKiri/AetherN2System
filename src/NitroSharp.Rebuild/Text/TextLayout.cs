@@ -1,4 +1,4 @@
-﻿global using TextLayout = NitroSharp.Text.TextLayout<NitroSharp.DesignPixel>;
+global using TextLayout = NitroSharp.Text.TextLayout<NitroSharp.DesignPixel>;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -19,6 +19,8 @@ namespace NitroSharp.Text
         private Line _lastLine;
 
         private readonly List<Line> _lines = [];
+        internal readonly List<TextRun> SavedRuns = [];
+        internal readonly List<int> SavedAppendLengths = [];
         private readonly List<GlyphRun> _glyphRuns = [];
         private readonly List<PositionedGlyph> _glyphs = [];
         private readonly List<float> _opacityValues = [];
@@ -68,6 +70,8 @@ namespace NitroSharp.Text
 
         public void Clear()
         {
+            SavedRuns.Clear();
+            SavedAppendLengths.Clear();
             _glyphRuns.Clear();
             _opacityValues.Clear();
             _glyphs.Clear();
@@ -87,6 +91,8 @@ namespace NitroSharp.Text
 
         public void Append(GlyphRasterizer glyphRasterizer, ReadOnlySpan<TextRun> textRuns)
         {
+            SavedAppendLengths.Add(textRuns.Length);
+            foreach (TextRun run in textRuns) SavedRuns.Add(run);
             int appendStart = _glyphs.Count;
             bool updateLastLine = appendStart > 0;
             var glyphBuf = new List<TextRunGlyph>();

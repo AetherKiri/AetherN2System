@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Collections.Generic;
 using NitroSharp.Input;
 using NitroSharp.Graphics;
@@ -44,7 +46,7 @@ internal sealed class Thread : Entity, IVmThread
 
     public override void Update(GameContext ctx)
     {
-        if (!_isPaused && IsEnabled && !_vmState.DoneExecuting && HasWaitExpired(ctx))
+        if (!_isPaused && IsEnabled && World?.HasPendingSceneLoad != true && !_vmState.DoneExecuting && HasWaitExpired(ctx))
         {
             _waitOperation = null;
             AdvanceScript(ctx.VM, ctx.Builtins);
@@ -62,7 +64,7 @@ internal sealed class Thread : Entity, IVmThread
             && EntityActionsCompleted(actionWait)) _waitOperation = null;
         int slices = 0;
         // Calls and builtin dispatch return Ok; finish polling before this input frame expires.
-        while (slices < sliceBudget && IsEnabled && !_isPaused && _waitOperation is null && !_vmState.DoneExecuting)
+        while (slices < sliceBudget && IsEnabled && !_isPaused && World?.HasPendingSceneLoad != true && _waitOperation is null && !_vmState.DoneExecuting)
         {
             slices++;
             if (vm.Tick(ref _vmState, builtins) == NsScriptVM.TickResult.Yield) break;
@@ -209,6 +211,7 @@ internal sealed class Thread : Entity, IVmThread
             { Condition: WaitCondition.FrameSequenceCompleted } => FrameSequencesCompleted(waitOperation),
             { Condition: WaitCondition.MediaCompleted } => MediaCompleted(waitOperation),
             { Condition: WaitCondition.EntityActionCompleted } => EntityActionsCompleted(waitOperation),
+            { Condition: WaitCondition.LegacyTransitionReady, ActionTargets: [] } => true,
             { Condition: WaitCondition.LegacyTransitionReady, ActionTargets: [LegacySceneTransition transition] }
                 => transition.IsCaptured || transition.IsPendingDestruction,
             {
@@ -252,6 +255,119 @@ internal sealed class Thread : Entity, IVmThread
         return true;
     }
 
+
+    internal void WriteSave(BinaryWriter writer, NsScriptVM vm, Func<Entity, int> id, TimeSpan now)
+    {
+        writer.Write(1);
+        writer.Write(IsMain);
+        vm.WriteThreadState(writer, _vmState);
+        writer.Write(_isPaused);
+        writer.Write(_nextCallScope);
+        CallScopeEntity[] scopes = _callScopes.ToArray();
+        writer.Write(scopes.Length);
+        foreach (CallScopeEntity scope in scopes) writer.Write(id(scope));
+        writer.Write(_waitOperation.HasValue);
+        if (_waitOperation is { } wait)
+        {
+            writer.Write((int)wait.Condition);
+            writer.Write(wait.EntityQuery.HasValue);
+            if (wait.EntityQuery is { } query) writer.Write(query.ToString());
+            writer.Write(wait.Deadline.HasValue);
+            if (wait.Deadline is { } deadline) writer.Write(Math.Max(0, (deadline - now).Ticks));
+            writer.Write(wait.AllowMovieSkip);
+            WriteReferences(wait.FrameSequences);
+            WriteReferences(wait.Videos);
+            WriteReferences(wait.Audio);
+            WriteReferences(wait.ActionTargets);
+        }
+
+        void WriteReferences<T>(T[]? targets) where T : Entity
+        {
+            Entity[] retained = targets?.Where(target => !target.IsPendingDestruction).Cast<Entity>().ToArray() ?? [];
+            writer.Write(retained.Length);
+            foreach (Entity target in retained) writer.Write(id(target));
+        }
+    }
+
+    internal static Thread ReadSave(EntityName name, Entity? parent, BinaryReader reader, NsScriptVM vm,
+        TimeSpan now, out Action<IReadOnlyList<Entity>> resolveReferences)
+    {
+        if (reader.ReadInt32() != 1) throw new InvalidDataException("Unsupported thread save version.");
+        bool main = reader.ReadBoolean();
+        var thread = new Thread(name, parent, vm.ReadThreadState(reader), main)
+        {
+            _isPaused = reader.ReadBoolean(),
+            _nextCallScope = ReadCount(reader, 1_000_000)
+        };
+        int[] scopes = ReadReferences();
+        int[] sequences = [], videos = [], audio = [], actions = [];
+        if (reader.ReadBoolean())
+        {
+            int condition = reader.ReadInt32();
+            if (!Enum.IsDefined(typeof(WaitCondition), condition)) throw new InvalidDataException("Invalid saved wait condition.");
+            EntityQuery? query = null;
+            if (reader.ReadBoolean())
+            {
+                string text = reader.ReadString();
+                if (text.Length > 4096 || EntityQuery.TryParse(text) is not { } parsed)
+                    throw new InvalidDataException("Invalid saved wait query.");
+                query = parsed;
+            }
+            TimeSpan? deadline = null;
+            if (reader.ReadBoolean())
+            {
+                long remaining = reader.ReadInt64();
+                if (remaining < 0 || remaining > TimeSpan.MaxValue.Ticks - now.Ticks)
+                    throw new InvalidDataException("Invalid saved wait duration.");
+                deadline = now + TimeSpan.FromTicks(remaining);
+            }
+            thread._waitOperation = new WaitOperation((WaitCondition)condition, query, deadline)
+            {
+                AllowMovieSkip = reader.ReadBoolean()
+            };
+            sequences = ReadReferences();
+            videos = ReadReferences();
+            audio = ReadReferences();
+            actions = ReadReferences();
+        }
+        resolveReferences = entities =>
+        {
+            for (int i = scopes.Length - 1; i >= 0; i--)
+                thread._callScopes.Push(Resolve<CallScopeEntity>(entities, scopes[i]));
+            if (thread._waitOperation is { } wait)
+                thread._waitOperation = wait with
+                {
+                    FrameSequences = sequences.Select(index => Resolve<FrameSequence>(entities, index)).ToArray(),
+                    Videos = videos.Select(index => Resolve<Video>(entities, index)).ToArray(),
+                    Audio = audio.Select(index => Resolve<AudioEntity>(entities, index)).ToArray(),
+                    ActionTargets = actions.Select(index => Resolve<Entity>(entities, index)).ToArray()
+                };
+        };
+        return thread;
+
+        int[] ReadReferences()
+        {
+            int count = ReadCount(reader, 1_000_000);
+            var indices = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                int index = reader.ReadInt32();
+                if (index < 0) throw new InvalidDataException("Invalid saved entity reference.");
+                indices[i] = index;
+            }
+            return indices;
+        }
+
+        static T Resolve<T>(IReadOnlyList<Entity> entities, int index) where T : Entity
+            => (uint)index < entities.Count && entities[index] is T result ? result
+                : throw new InvalidDataException("Saved entity reference has the wrong target.");
+    }
+
+    private static int ReadCount(BinaryReader reader, int maximum)
+    {
+        int count = reader.ReadInt32();
+        return (uint)count <= maximum ? count : throw new InvalidDataException("Invalid saved thread collection size.");
+    }
 
     internal enum WaitCondition
     {

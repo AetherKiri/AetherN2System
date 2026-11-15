@@ -17,7 +17,9 @@ internal enum InputAction
     Down,
     Skip,
     TriggerLeft,
-    TriggerRight
+    TriggerRight,
+    QuickSave,
+    QuickLoad
 }
 
 internal sealed class InputContext(GameWindow window) : IDisposable
@@ -150,6 +152,8 @@ internal sealed class InputContext(GameWindow window) : IDisposable
             InputAction.Right => Snapshot.IsKeyDown(Key.Right) || _gamepadPresses.Contains(GamepadButton.DPadRight),
             InputAction.Down => Snapshot.IsKeyDown(Key.Down) || _gamepadPresses.Contains(GamepadButton.DPadDown)
                 || Snapshot.WheelDelta.Y < 0,
+            InputAction.QuickSave => Snapshot.IsKeyDown(Key.F5),
+            InputAction.QuickLoad => Snapshot.IsKeyDown(Key.F9),
             _ => false
         };
     }

@@ -1,4 +1,13 @@
 <Project>
+  <Target Name="ConfigureAndroidNativeAotTarget" AfterTargets="SetupOSSpecificProps"
+          Condition="'$(IsAndroid)' == 'true' And '$(AetherAndroidTargetTriple)' != ''">
+    <!-- NativeAOT chooses API 21 inside SetupOSSpecificProps. Update its link
+         argument after that target so the NDK uses the application's API. -->
+    <ItemGroup>
+      <LinkerArg Remove="@(LinkerArg)" Condition="$([System.String]::Copy('%(Identity)').StartsWith('--target='))" />
+      <LinkerArg Include="--target=$(AetherAndroidTargetTriple)" />
+    </ItemGroup>
+  </Target>
   <Target Name="PruneObsoleteSprintfRuntimeAssets"
           AfterTargets="ResolvePackageAssets"
           Condition="'$(TargetFrameworkIdentifier)' == '.NETCoreApp' And $([MSBuild]::VersionGreaterThanOrEquals('$(_TargetFrameworkVersionWithoutV)', '8.0')) And '$(UseRidGraph)' != 'true' And @(RuntimeHostConfigurationOption->WithMetadataValue('Identity', 'System.Runtime.Loader.UseRidGraph')->WithMetadataValue('Value', 'true')->Count()) == 0">

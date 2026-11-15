@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
     <OutputPath>$(RepoRootDirectory)\bin\$(Configuration)</OutputPath>
+    <OutputPath Condition="'$(NativeRid)' != ''">$(RepoRootDirectory)\bin\$(NativeRid)\$(Configuration)</OutputPath>
   </PropertyGroup>
 
   <Choose>

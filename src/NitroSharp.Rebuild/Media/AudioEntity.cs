@@ -6,7 +6,7 @@ using NitroSharp.NsScript.VM;
 namespace NitroSharp.Media;
 
 /// <summary>Script-visible audio with a reusable source and reopenable media.</summary>
-internal sealed class AudioEntity : Entity
+internal sealed partial class AudioEntity : Entity
 {
     private readonly Func<Stream> _openStream;
     private readonly AudioContext _audioContext;

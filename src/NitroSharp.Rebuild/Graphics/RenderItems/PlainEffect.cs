@@ -7,7 +7,7 @@ namespace NitroSharp.Graphics;
 
 // Plain reads the last completed frame. Passive retains that frame while the
 // entity's move, opacity and other outer animations continue independently.
-internal sealed class PlainEffect : RenderItem
+internal sealed partial class PlainEffect : RenderItem
 {
     private readonly DesignSizeU _size;
     private readonly Func<DesignRectU, SpriteTexture> _capture;

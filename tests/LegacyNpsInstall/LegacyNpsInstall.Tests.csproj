@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/NitroSharp.Rebuild/NitroSharp.Rebuild.csproj" />
     <Compile Include="../../aether_runtime/LegacyNpsInstall.cs" Link="LegacyNpsInstall.cs" />
+    <Compile Include="../../aether_runtime/SaveStorageLocation.cs" Link="SaveStorageLocation.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" PrivateAssets="all" />

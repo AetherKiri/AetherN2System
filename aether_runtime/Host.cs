@@ -116,12 +116,13 @@ internal static unsafe class Exports
                 if (!s_initialized)
                 {
                     Game.InitializeHostLogging();
-                    NativeDependencies.Initialize();
+                    NativeDependencies.Initialize(writable);
                     Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
                     s_initialized = true;
                 }
             GameProfile profile = ReadProfile(root, writable);
             profile.WritableDirectory = writable;
+            profile.SaveDataDirectory = SaveStorageLocation.Select(root, writable, profile.ProductName, profile.Name);
             ScreenSizeU size =
                 width == 0 && height == 0
                     ? profile.DesignResolution.Convert(Scale<DesignPixel, ScreenPixel>.Identity)
@@ -129,9 +130,13 @@ internal static unsafe class Exports
             if (size.Width == 0 || size.Height == 0 || size.Width > 8192 || size.Height > 8192)
                 throw new ArgumentOutOfRangeException("resolution");
             string backend =
+#if IOS
+                "Metal";
+#else
                 OperatingSystem.IsMacOS() ? "Metal"
                 : OperatingSystem.IsWindows() ? "D3D11"
                 : "Vulkan";
+#endif
             using var configStream = new MemoryStream(
                 Encoding.UTF8.GetBytes(
                     "{\"graphics.backend\":\""

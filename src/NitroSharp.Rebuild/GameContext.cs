@@ -18,6 +18,7 @@ using NitroSharp.NsScript.Compiler;
 using NitroSharp.NsScript.VM;
 using NitroSharp.Text;
 using NitroSharp.Utilities;
+using NitroSharp.Saving;
 using Veldrid;
 using ZeroLog;
 
@@ -43,6 +44,8 @@ internal sealed class GameContext : IDisposable
     internal required InputContext InputContext { get; init; }
     internal required NsScriptVM VM { get; init; }
     private Builtins? _builtins;
+    private GameSaveManager? _saves;
+    internal GameSaveManager Saves => _saves ??= new GameSaveManager(this);
     internal Builtins Builtins => _builtins
         ?? throw new InvalidOperationException("The game context has not finished initialization.");
     internal required World World { get; init; }
@@ -130,6 +133,7 @@ internal sealed class GameContext : IDisposable
         }
         RenderContext.EndFrame();
         RenderContext.Present();
+        Saves.CompletePendingSaves();
     }
 
     public static async Task<GameContext> Create(
@@ -192,6 +196,7 @@ internal sealed class GameContext : IDisposable
                 RootLog = log,
             };
             context._builtins = new Builtins(context);
+            _ = context.Saves;
             log.Info(
                 $"Init successful. Graphics backend: {gd.BackendType}; audio backend: {audio.Device.Backend}."
             );

@@ -5,6 +5,7 @@ using NitroSharp.NsScript;
 using NitroSharp.Input;
 using NitroSharp.NsScript.VM;
 using System.IO;
+using NitroSharp.Saving;
 
 namespace NitroSharp;
 
@@ -13,8 +14,15 @@ internal sealed class World : EntityScope
     private readonly List<Process> _processes = [];
     private readonly List<Entity> _newEntities = [];
     private readonly List<Entity> _deletedEntities = [];
+    private readonly HashSet<Entity> _preserveEnabled = [];
     private Process? _systemMenu;
     private NsScriptThreadState? _pendingReset;
+    private NativeSaveMenu? _nativeSaveMenu;
+    private bool _nativeMenuRequested;
+    private bool? _nativeMenuMode;
+    private GameContext? _context;
+    internal bool HasPendingSceneLoad => _nativeMenuRequested || _context?.Saves.HasPendingLoad == true;
+    internal bool IsSystemMenu => !ReferenceEquals(CurrentProcess, MainProcess);
 
     public World(Process mainProcess, Thread mainThread)
     {
@@ -26,7 +34,7 @@ internal sealed class World : EntityScope
     public Process CurrentProcess { get; private set; }
     public Process MainProcess { get; private set; }
 
-    public T AddEntity<T>(T entity) where T : Entity
+    public T AddEntity<T>(T entity, bool enableNextFrame = true) where T : Entity
     {
         if (entity.Parent is { } parent)
         {
@@ -38,6 +46,7 @@ internal sealed class World : EntityScope
         }
 
         _newEntities.Add(entity);
+        if (!enableNextFrame) _preserveEnabled.Add(entity);
         if (entity is Process process)
         {
             _processes.Add(process);
@@ -83,6 +92,7 @@ internal sealed class World : EntityScope
         foreach (Process process in _processes.ToArray()) CommitDestroyEntity(process);
         _newEntities.Clear();
         _deletedEntities.Clear();
+        _preserveEnabled.Clear();
     }
 
     public void BeginFrame()
@@ -94,11 +104,12 @@ internal sealed class World : EntityScope
 
         foreach (Entity entity in _newEntities)
         {
-            if (!entity.IsPendingDestruction) entity.Enable();
+            if (!entity.IsPendingDestruction && !_preserveEnabled.Contains(entity)) entity.Enable();
         }
 
         _deletedEntities.Clear();
         _newEntities.Clear();
+        _preserveEnabled.Clear();
     }
 
     public Entity? Get(in EntityPath entityPath)
@@ -193,14 +204,86 @@ internal sealed class World : EntityScope
 
     public void Update(GameContext ctx)
     {
+        _context = ctx;
+        if (_nativeSaveMenu is { } nativeMenu)
+        {
+            bool close = nativeMenu.Update(ctx);
+            if (ctx.Saves.ApplyPendingLoad()) return;
+            if (close) CloseNativeSaveMenu();
+            else nativeMenu.Process.Update(ctx);
+            return;
+        }
+        if (!IsSystemMenu)
+        {
+            if (ctx.InputContext.Consume(InputAction.QuickSave) && !ReadLock(ctx, "SYSTEM_save_lock"))
+                ctx.Saves.RequestSave(9998);
+            if (ctx.InputContext.Consume(InputAction.QuickLoad) && !ReadLock(ctx, "SYSTEM_load_lock"))
+                ctx.Saves.RequestLoad(9998);
+        }
+        if (ctx.Saves.ApplyPendingLoad()) return;
         CurrentProcess.MainThread.InterruptVideoWait(ctx.InputContext);
         if (_systemMenu is null && !(ctx.VM.SystemVariables.MenuLock.AsBool() ?? false)
             && ctx.InputContext.Consume(InputAction.Back))
         {
-            TryBeginSystemMenu(ctx.VM, ctx.Profile.SysScripts.Menu);
+            ctx.Saves.CaptureStoryFrame();
+            if (!TryBeginSystemMenu(ctx.VM, ctx.Profile.SysScripts.Menu))
+                OpenNativeSaveMenu(ctx, null);
         }
+        if (ApplyNativeSaveMenu(ctx)) return;
         CurrentProcess.Update(ctx);
+        if (ctx.Saves.ApplyPendingLoad()) return;
+        if (ApplyNativeSaveMenu(ctx)) return;
         if (!ApplyPendingReset()) FinishSystemMenu();
+    }
+
+    private static bool ReadLock(GameContext ctx, string name) => ctx.VM.GetHostVariable(name).AsBool() ?? false;
+
+    internal void OpenNativeSaveMenu(GameContext ctx, bool? saving)
+    {
+        if (_nativeSaveMenu is not null) return;
+        if (saving is { } save && ReadLock(ctx, save ? "SYSTEM_save_lock" : "SYSTEM_load_lock")) return;
+        _nativeMenuMode = saving;
+        _nativeMenuRequested = true;
+    }
+
+    private bool ApplyNativeSaveMenu(GameContext ctx)
+    {
+        if (!_nativeMenuRequested) return false;
+        _nativeMenuRequested = false;
+        if (ReferenceEquals(CurrentProcess, MainProcess)) ctx.Saves.CaptureStoryFrame();
+        _nativeSaveMenu = new NativeSaveMenu(ctx, _nativeMenuMode);
+        CurrentProcess = AddEntity(_nativeSaveMenu.Process);
+        CurrentProcess.Enable();
+        return true;
+    }
+
+    private void CloseNativeSaveMenu()
+    {
+        if (_nativeSaveMenu is not { } menu) return;
+        _nativeSaveMenu = null;
+        CurrentProcess = _systemMenu ?? MainProcess;
+        DestroyEntity(menu.Process);
+    }
+
+    internal void ReplaceMainProcess(Process process)
+    {
+        foreach (Process previous in _processes.ToArray())
+            if (!ReferenceEquals(previous, process)) DestroyEntity(previous);
+        MainProcess = CurrentProcess = process;
+        _systemMenu = null;
+        _nativeSaveMenu = null;
+        _nativeMenuRequested = false;
+        _pendingReset = null;
+    }
+
+    internal void DiscardRestoredProcess(Process process)
+    {
+        var discarded = new HashSet<Entity>();
+        foreach (Entity entity in process.DescendantsAndSelf()) discarded.Add(entity);
+        _newEntities.RemoveAll(discarded.Contains);
+        _deletedEntities.RemoveAll(discarded.Contains);
+        foreach (Entity entity in discarded) _preserveEnabled.Remove(entity);
+        CommitDestroyEntity(process);
     }
 
     internal void RequestReset(NsScriptThreadState startup)

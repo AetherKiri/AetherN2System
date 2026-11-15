@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using MessagePack;
 using System.Collections.Immutable;
 using System.Numerics;
@@ -18,7 +18,7 @@ internal enum AnimationKind
     FrameSequence
 }
 
-internal abstract class Animation
+internal abstract partial class Animation
 {
     protected enum AdvanceResult
     {
@@ -98,7 +98,7 @@ internal abstract class Animation
     }
 }
 
-internal abstract class AnimationWithDuration : Animation
+internal abstract partial class AnimationWithDuration : Animation
 {
     private readonly TimeSpan _duration;
 
@@ -215,7 +215,7 @@ internal readonly struct ProcessedBezierCurve
     }
 }
 
-internal sealed class OpacityAnimation : AnimationWithDuration
+internal sealed partial class OpacityAnimation : AnimationWithDuration
 {
     private readonly RenderItem _entity;
     private readonly float _startOpacity;
@@ -243,7 +243,7 @@ internal sealed class OpacityAnimation : AnimationWithDuration
     }
 }
 
-internal abstract class Vector3Animation<TEntity> : PropertyAnimation<TEntity, Vector3>
+internal abstract partial class Vector3Animation<TEntity> : PropertyAnimation<TEntity, Vector3>
     where TEntity : Entity
 {
     private readonly Vector3 _startValue;
@@ -288,7 +288,7 @@ internal sealed class RotationAnimation(
     protected override ref Vector3 GetValueRef() => ref _entity.Transform.Rotation;
 }
 
-internal sealed class BezierMoveAnimation(
+internal sealed partial class BezierMoveAnimation(
     RenderItem entity, ProcessedBezierCurve curve, TimeSpan duration, NsEaseFunction easeFunction)
     : AnimationWithDuration(duration, easeFunction)
 {

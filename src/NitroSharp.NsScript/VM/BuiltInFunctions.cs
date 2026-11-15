@@ -184,6 +184,9 @@ public abstract class BuiltInFunctions
     public virtual void SaveGame(uint slot) { NotImplemented(); }
     public virtual void LoadGame(uint slot) { NotImplemented(); }
     public virtual void DeleteSave(uint slot) { NotImplemented(); }
+    public virtual string ReadFile(string path) => NotImplemented<string>();
+    public virtual void WriteFile(string path, string text, bool append = false) { NotImplemented(); }
+    public virtual void OpenSaveMenu(bool saving) { NotImplemented(); }
 
     public virtual int GetSecondsElapsed() => NotImplemented<int>();
 

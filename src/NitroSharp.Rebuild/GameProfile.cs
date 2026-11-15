@@ -35,6 +35,7 @@ public sealed class GameProfile
     public string? DialogueVariables { get; init; }
     public string? NpaScheme { get; init; }
     internal string? WritableDirectory { get; set; }
+    internal string? SaveDataDirectory { get; set; }
 
     public static GameProfile Read(Stream stream)
     {
