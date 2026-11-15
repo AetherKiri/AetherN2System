@@ -46,7 +46,9 @@ public readonly record struct NsColor
 
     public static NsColor FromString(string colorString)
     {
-        ReadOnlySpan<char> codeStr = colorString.StartsWith('#')
+        // Native color conversion skips the multibyte fullwidth hash in a shipped effect color.
+        // Accept that prefix while keeping the hex digits strict.
+        ReadOnlySpan<char> codeStr = colorString.StartsWith('#') || colorString.StartsWith('＃')
             ? colorString.AsSpan(1)
             : colorString;
 

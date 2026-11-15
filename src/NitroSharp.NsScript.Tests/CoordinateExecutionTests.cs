@@ -160,9 +160,12 @@ public sealed class CoordinateExecutionTests
     }
 
     [Fact]
-    public void MoveStillRejectsUnknownCoordinateLabels()
+    public void MoveUsesZeroForUnknownCoordinateLabelsLikeTheNativeEngine()
     {
-        Assert.Throws<ArgumentException>(() => Execute("chapter main { Move(\"sprite\", 0, UnknownPivot, 110, null, true); }"));
+        var builtins = Execute("chapter main { Move(\"sprite\", 0, UnknownPivot, 110, null, true); }");
+        var move = Assert.Single(builtins.Moves);
+        Assert.Equal((0f, false), move.x.Value);
+        Assert.Equal((110f, false), move.y.Value);
     }
 
     private static TestBuiltins Execute(string source)
@@ -190,6 +193,7 @@ public sealed class CoordinateExecutionTests
     {
         public List<string> Choices { get; } = [];
         public List<(string query, NsCoordinate x, NsCoordinate y)> Vertices { get; } = [];
+        public List<(NsCoordinate x, NsCoordinate y)> Moves { get; } = [];
         public List<(string function, string argument, string value)> InvalidArguments { get; } = [];
         public List<(NsFontWeight weight, NsOutlineOffset outline, NsColor color, NsColor outlineColor)> Fonts { get; } = [];
         public List<(string query, float speed)> ScrollSpeeds { get; } = [];
@@ -198,6 +202,8 @@ public sealed class CoordinateExecutionTests
         public override void AssertTrue(bool value) => Assert.True(value);
         public override void CreateChoice(in EntityPath entityPath) => Choices.Add(entityPath.ToString());
         public override void SetVertex(in EntityQuery query, NsCoordinate x, NsCoordinate y) => Vertices.Add((query.ToString(), x, y));
+        public override void Move(in EntityQuery query, TimeSpan duration, NsCoordinate x, NsCoordinate y,
+            NsEaseFunction easeFunction, TimeSpan waitTimeout) => Moves.Add((x, y));
         public override void ReportInvalidArgument(string functionName, string argumentName, in ConstantValue value)
             => InvalidArguments.Add((functionName, argumentName, value.ConvertToString()));
         public override void SetFont(string family, uint size, NsColor color, NsColor outlineColor, NsFontWeight weight, NsOutlineOffset outlineOffset)

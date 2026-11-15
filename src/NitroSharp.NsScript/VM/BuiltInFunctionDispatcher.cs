@@ -862,8 +862,8 @@ internal sealed class BuiltInFunctionDispatcher
     {
         EntityQuery query = args.TakeEntityQuery();
         TimeSpan duration = args.TakeTimeSpan();
-        NsCoordinate dstX = args.TakeCoordinate();
-        NsCoordinate dstY = args.TakeCoordinate();
+        NsCoordinate dstX = args.TakeMoveCoordinate();
+        NsCoordinate dstY = args.TakeMoveCoordinate();
         NsEaseFunction easeFunction = NsEaseFunction.Linear;
         TimeSpan waitTimeout = TimeSpan.Zero;
         if (args.Count == 6)
@@ -1354,6 +1354,26 @@ internal sealed class BuiltInFunctionDispatcher
                 BuiltInType.BuiltInConstant => NsColor.FromConstant(val.AsBuiltInConstant()!.Value),
                 _ => UnexpectedType<NsColor>(val.Type)
             };
+        }
+
+        public NsCoordinate TakeMoveCoordinate()
+        {
+            ConstantValue arg = TakeOpt(ConstantValue.Number(0));
+            if (arg.AsString() is not { } text) return NsCoordinate.FromValue(arg);
+            try { return NsCoordinate.FromValue(arg); }
+            catch (ArgumentException)
+            {
+                // Native Move uses atol for unresolved coordinate strings; it does not correct pivot spellings.
+                bool relative = text.StartsWith('@');
+                ReadOnlySpan<char> number = (relative ? text.AsSpan(1) : text.AsSpan()).TrimStart();
+                int digitsStart = number.Length > 0 && number[0] is '+' or '-' ? 1 : 0;
+                int end = digitsStart;
+                while (end < number.Length && number[end] is >= '0' and <= '9') end++;
+                int value = 0;
+                if (end > digitsStart && !int.TryParse(number[..end], NumberStyles.AllowLeadingSign,
+                    CultureInfo.InvariantCulture, out value)) return UnexpectedType<NsCoordinate>(arg.Type);
+                return NsCoordinate.FromValue(relative ? ConstantValue.Delta(value) : ConstantValue.Number(value));
+            }
         }
 
         public NsCoordinate TakeCoordinate()

@@ -516,7 +516,12 @@ namespace NitroSharp.NsScript.Syntax
             {
                 EatToken();
                 newPrecedence = Precedence.Unary;
-                Expression operand = ParseSubExpression(newPrecedence);
+                // A bare relative coordinate is an authored zero offset. It must still
+                // push an operand before Delta, since earlier call arguments share the stack.
+                Expression operand = unaryOperator == UnaryOperatorKind.Delta
+                    && _currentToken.Kind is SyntaxTokenKind.Comma or SyntaxTokenKind.CloseParen
+                    ? new LiteralExpression(ConstantValue.Number(0), tkSpan)
+                    : ParseSubExpression(newPrecedence);
                 var fullSpan = TextSpan.FromBounds(tkSpan.Start, operand.Span.End);
                 leftOperand = new UnaryExpression(
                     operand,

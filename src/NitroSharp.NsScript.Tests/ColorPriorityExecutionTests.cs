@@ -19,7 +19,7 @@ public sealed class ColorPriorityExecutionTests
             function EndFileBlackOut($Pri) { CreateColorEX("EndFileBlackOut", $Pri, "#000000"); }
             function CreateColorEX("name", priority, image) { CreateColor("name", priority, 1024, 0, 1024, 576, image); }
             """);
-        Assert.Equal(new[] { 20000, -42 }, priorities);
+        Assert.Equal(new[] { 20000, -42 }, priorities.Priorities);
     }
 
     [Theory]
@@ -30,7 +30,26 @@ public sealed class ColorPriorityExecutionTests
     public void MissingDigitsAndOverflowRemainRejected(string priority)
         => Assert.Throws<NsxCallDispatchException>(() => Run("chapter main { CreateColor(\"rect\", \"" + priority + "\", 0, 0, 2, 2, \"Black\"); }"));
 
-    private static List<int> Run(string source)
+    [Theory]
+    [InlineData("＃FFFFFF", 0xFFFFFF)]
+    [InlineData("＃CC0000", 0xCC0000)]
+    public void AuthoredFullwidthHashColorsReachTheRectangle(string color, int rgb)
+    {
+        var result = Run($$"""
+            chapter main { EffectZoomDXadd("{{color}}"); }
+            function EffectZoomDXadd(effectColor) { CreateColor("flash", 4011, 1024, 0, 1024, 576, effectColor); }
+            """);
+        Assert.Equal(NsColor.FromRgb(rgb), Assert.Single(result.Colors));
+    }
+
+    [Theory]
+    [InlineData("＃＃FFFFFF")]
+    [InlineData("＃FFGGFF")]
+    [InlineData("＃ＦＦＦＦＦＦ")]
+    public void FullwidthHashDoesNotNormalizeOtherMalformedColorText(string color)
+        => Assert.Throws<ArgumentException>(() => NsColor.FromString(color));
+
+    private static RecordingBuiltins Run(string source)
     {
         string root = Path.Combine(Path.GetTempPath(), "ns-color-priority-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -46,7 +65,7 @@ public sealed class ColorPriorityExecutionTests
             var builtins = new RecordingBuiltins();
             for (int i = 0; i < 100 && !thread.DoneExecuting; i++) vm.Tick(ref thread, builtins);
             Assert.True(thread.DoneExecuting);
-            return builtins.Priorities;
+            return builtins;
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -54,7 +73,8 @@ public sealed class ColorPriorityExecutionTests
     private sealed class RecordingBuiltins : BuiltInFunctions
     {
         public List<int> Priorities { get; } = [];
+        public List<NsColor> Colors { get; } = [];
         public override void CreateRectangle(in EntityPath path, int priority, NsCoordinate x, NsCoordinate y,
-            uint width, uint height, NsColor color) => Priorities.Add(priority);
+            uint width, uint height, NsColor color) { Priorities.Add(priority); Colors.Add(color); }
     }
 }
