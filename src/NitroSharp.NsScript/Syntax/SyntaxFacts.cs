@@ -74,6 +74,7 @@ public static class SyntaxFacts
             case ')':
             case '=':
             case '+':
+            case '-':
             case '*':
             case '/':
             case '<':
@@ -86,9 +87,6 @@ public static class SyntaxFacts
             case '#':
             case '@':
             case EofCharacter:
-                return false;
-            // Hack: O-FRONT is a valid identifier, but O-42 is not.
-            case '-':
                 return false;
             default:
                 return true;

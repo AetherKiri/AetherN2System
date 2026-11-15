@@ -80,6 +80,7 @@ public class LexerTests
     [InlineData("42.2", SyntaxTokenKind.NumericLiteral, "42.2", SyntaxTokenFlags.HasDecimalPoint)]
     [InlineData("#FFFFFF", SyntaxTokenKind.NumericLiteral, "FFFFFF", SyntaxTokenFlags.IsHexTriplet)]
     [InlineData("\"foo\"", SyntaxTokenKind.StringLiteralOrQuotedIdentifier, "foo", SyntaxTokenFlags.IsQuoted)]
+    [InlineData("\"bg165_03_3_O-FRONT見上げ_a\"", SyntaxTokenKind.StringLiteralOrQuotedIdentifier, "bg165_03_3_O-FRONT見上げ_a", SyntaxTokenFlags.IsQuoted)]
     [InlineData("\"@\"", SyntaxTokenKind.StringLiteralOrQuotedIdentifier, "@", SyntaxTokenFlags.IsQuoted)]
     [InlineData("true", SyntaxTokenKind.TrueKeyword, "true")]
     [InlineData("false", SyntaxTokenKind.FalseKeyword, "false")]
@@ -115,7 +116,6 @@ public class LexerTests
     [InlineData("foo_bar")]
     [InlineData("foo.bar")]
     // special cases
-    [InlineData("bg165_03_3_O-FRONT見上げ_a")]
     [InlineData("215_ＡＡルートグッドエンド")]
     [InlineData("$215_ＡＡルートグッドエンド")]
     [InlineData("#215_ＡＡルートグッドエンド")]
@@ -129,6 +129,9 @@ public class LexerTests
 
     [Theory]
     [InlineData("cat-meow", new[] { "cat", "-", "meow" })]
+    [InlineData("bg165_03_3_O-FRONT見上げ_a", new[] { "bg165_03_3_O", "-", "FRONT見上げ_a" })]
+    [InlineData("O-FRONT", new[] { "O", "-", "FRONT" })]
+    [InlineData("O-42", new[] { "O", "-", "42" })]
     [InlineData("cat+meow", new[] { "cat", "+", "meow" })]
     [InlineData("cat,meow", new[] { "cat", ",", "meow" })]
     [InlineData("cat/meow", new[] { "cat", "/", "meow" })]
@@ -137,10 +140,39 @@ public class LexerTests
     public void InvalidIdentifier(string text, string[] tokens)
     {
         var lexResult = SyntaxToken.Lex(text);
-        foreach ((SyntaxToken actual, string expected) in lexResult.RealizeTokens().Zip(tokens))
-        {
-            Assert.Equal(expected, lexResult.GetText(actual));
-        }
+        SyntaxToken[] actualTokens = lexResult.RealizeTokens();
+        Assert.Equal(tokens.Length + 1, actualTokens.Length);
+        Assert.Equal(SyntaxTokenKind.EndOfFile, actualTokens[^1].Kind);
+        Assert.Equal(tokens, actualTokens[..^1].Select(token => lexResult.GetText(token).ToString()));
+    }
+
+    [Theory]
+    [InlineData("left-right", SyntaxTokenKind.Identifier, SyntaxTokenKind.Identifier)]
+    [InlineData("cat-meow", SyntaxTokenKind.Identifier, SyntaxTokenKind.Identifier)]
+    [InlineData("bg165_03_3_O-FRONT見上げ_a", SyntaxTokenKind.Identifier, SyntaxTokenKind.Identifier)]
+    [InlineData("$x-$y", SyntaxTokenKind.Identifier, SyntaxTokenKind.Identifier)]
+    [InlineData("x-42", SyntaxTokenKind.Identifier, SyntaxTokenKind.NumericLiteral)]
+    [InlineData("42-right", SyntaxTokenKind.NumericLiteral, SyntaxTokenKind.Identifier)]
+    [InlineData("42-7", SyntaxTokenKind.NumericLiteral, SyntaxTokenKind.NumericLiteral)]
+    public void Hyphen_Remains_Subtraction(string text, SyntaxTokenKind left, SyntaxTokenKind right)
+    {
+        var lexResult = SyntaxToken.Lex(text);
+        SyntaxToken[] tokens = lexResult.RealizeTokens();
+        Assert.Equal(new[] { left, SyntaxTokenKind.Minus, right, SyntaxTokenKind.EndOfFile },
+            tokens.Select(token => token.Kind));
+        Assert.Empty(lexResult.Diagnostics);
+    }
+
+    [Fact]
+    public void Sigiled_Identifier_Preserves_Decrement()
+    {
+        var lexResult = SyntaxToken.Lex("$x--");
+        SyntaxToken[] tokens = lexResult.RealizeTokens();
+        Assert.Equal(new[] { SyntaxTokenKind.Identifier, SyntaxTokenKind.MinusMinus, SyntaxTokenKind.EndOfFile },
+            tokens.Select(token => token.Kind));
+        Assert.Equal(SigilKind.Dollar, tokens[0].GetSigil());
+        Assert.Equal("x", lexResult.GetValueText(tokens[0]).ToString());
+        Assert.Empty(lexResult.Diagnostics);
     }
 
     [Fact]
