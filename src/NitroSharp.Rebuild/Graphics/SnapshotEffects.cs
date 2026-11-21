@@ -1,12 +1,13 @@
 using System;
 using NitroSharp.Graphics.Core;
+using NitroSharp.NsScript;
 using Veldrid;
 
 namespace NitroSharp.Graphics;
 
-internal static class SnapshotBlur
+internal static class SnapshotEffects
 {
-    public static SpriteTexture Apply(RenderContext context, in SpriteTexture source, uint passes)
+    public static SpriteTexture Apply(RenderContext context, in SpriteTexture source, uint blurPasses, NsTone tone = NsTone.None)
     {
         Texture input = source.Resolve(context);
         using var first = new RenderTarget(context.GraphicsDevice, new ScreenSizeU(input.Width, input.Height));
@@ -25,14 +26,15 @@ internal static class SnapshotBlur
                 1, 1, first.ColorTarget.Format, TextureUsage.Sampled));
             commands.Begin();
             RenderTarget target = first;
-            for (int pass = 0; pass < passes; pass++)
+            for (int pass = 0; pass < blurPasses + (tone == NsTone.None ? 0 : 1); pass++)
             {
                 target = pass % 2 == 0 ? first : second;
                 commands.SetFramebuffer(target.Framebuffer);
                 commands.SetFullViewports();
                 commands.SetFullScissorRect(0);
                 commands.ClearColorTarget(0, RgbaFloat.Clear);
-                commands.SetPipeline(resources.GetPipeline(EffectKind.BoxBlur));
+                commands.SetPipeline(resources.GetPipeline(pass < blurPasses ? EffectKind.BoxBlur
+                    : tone == NsTone.Sepia ? EffectKind.Sepia : EffectKind.Grayscale));
                 commands.SetGraphicsResourceSet(0, bindings[pass == 0 ? 0 : pass % 2 == 0 ? 2 : 1]);
                 commands.Draw(3);
             }

@@ -673,12 +673,11 @@ internal sealed class BuiltInFunctionDispatcher
     private void SetTone(ref ArgConsumer args)
     {
         EntityQuery query = args.TakeEntityQuery();
-        if (args.TakeConstant() != BuiltInConstant.Monochrome)
-        {
-            throw new Exception();
-        }
-
-        _impl.Grayscale(query);
+        ConstantValue value = args.Take();
+        if (value.IsNull) _impl.SetTone(query, NsTone.None);
+        else if (value.AsBuiltInConstant() == BuiltInConstant.Monochrome) _impl.SetTone(query, NsTone.Monochrome);
+        else if (string.Equals(value.AsString(), "Sepia", StringComparison.OrdinalIgnoreCase)) _impl.SetTone(query, NsTone.Sepia);
+        else _impl.ReportInvalidArgument("SetTone", "tone", value);
     }
 
     private void SetShade(ref ArgConsumer args)
@@ -1339,7 +1338,7 @@ internal sealed class BuiltInFunctionDispatcher
             ConstantValue val = TakeOpt(ConstantValue.Number(0));
             float num = val.Type switch
             {
-                BuiltInType.Numeric => val.AsNumber()!.Value,
+                BuiltInType.Numeric or BuiltInType.Boolean => val.AsNumber()!.Value,
                 BuiltInType.String => int.Parse(val.AsString()!),
                 BuiltInType.Null => 0,
                 _ => UnexpectedType<int>(val.Type)

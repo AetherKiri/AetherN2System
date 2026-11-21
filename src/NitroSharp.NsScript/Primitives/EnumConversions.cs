@@ -8,6 +8,8 @@ internal static class EnumConversions
         {
             BuiltInConstant.Lock => NsEntityAction.Lock,
             BuiltInConstant.Unlock => NsEntityAction.Unlock,
+            BuiltInConstant.Clickable => NsEntityAction.UseHandCursor,
+            BuiltInConstant.UnClickable => NsEntityAction.UseArrowCursor,
             BuiltInConstant.Disused => NsEntityAction.DestroyWhenIdle,
             BuiltInConstant.Erase => NsEntityAction.Disable,
             BuiltInConstant.Enter => NsEntityAction.Enable,

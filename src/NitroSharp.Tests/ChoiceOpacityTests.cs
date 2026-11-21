@@ -69,6 +69,20 @@ public sealed class ChoiceOpacityTests
         Assert.Equal("legacy", legacy.Path);
     }
 
+    [Theory]
+    [InlineData("UnClickable", NsEntityAction.UseArrowCursor)]
+    [InlineData("Clickable", NsEntityAction.UseHandCursor)]
+    public void CursorHintsPreserveChoiceHitTesting(string token, NsEntityAction expected)
+    {
+        using var script = new Script($"chapter main {{ Request(\"choice\", {token}); }}");
+        var recording = new RecordingBuiltins();
+        script.Run(recording);
+        Assert.Equal(expected, recording.Action);
+        var choice = CreateChoice(false);
+        Assert.True(choice.Request(recording.Action));
+        Assert.True(choice.IsClickable);
+    }
+
     private static ChoiceEntity CreateChoice(bool preserve)
     {
         var context = new TestContext();
@@ -90,6 +104,8 @@ public sealed class ChoiceOpacityTests
     private sealed class RecordingBuiltins : BuiltInFunctions
     {
         public (string, bool) Choice;
+        public NsEntityAction Action;
+        public override void Request(in EntityQuery query, NsEntityAction action) => Action = action;
         public override void CreateChoice(in EntityPath path, bool preserveOpacity = false)
             => Choice = (path.ToString(), preserveOpacity);
     }

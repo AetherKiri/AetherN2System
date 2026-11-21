@@ -88,6 +88,20 @@ with tempfile.TemporaryDirectory(prefix='aether-mask-transition-') as cache:
             assert [sample(x, 60)[0] for x in (40, 41, 42, 43)] == strongest, 'NORMAL must retain the active shade'
             advance()
             assert [sample(x, 60)[0] for x in (40, 41, 42, 43)] == crop
-            print(f'{width}x{height}: passive/cropped GPU blur, NOMORE32, NORMAL retention and null restoration passed')
+            original = [sample(x, 60) for x in (40, 41, 42, 43)]
+            advance()
+            for x, (r, g, b, a) in zip((40, 41, 42, 43), original):
+                # Filtering happens on the source texels before subpixel crop sampling.
+                # Black maps to (30,30,0); white maps to (255,255,253).
+                assert r == g == b
+                warm = round(30 + 225 * r / 255)
+                near(sample(x, 60), (warm, warm, round(253 * r / 255), a))
+            advance()
+            for x in (40, 41, 42, 43):
+                r, g, b, _ = sample(x, 60)
+                assert r == g == b
+            advance()
+            assert [sample(x, 60) for x in (40, 41, 42, 43)] == original
+            print(f'{width}x{height}: sepia, monochrome, passive/cropped GPU blur, NOMORE32, NORMAL retention and null restoration passed')
         finally:
             lib.aether_n2system_destroy(handle)

@@ -80,7 +80,7 @@ internal sealed partial class PlainEffect : RenderItem
         if (_blurDirty)
         {
             _blurredSnapshot?.Dispose();
-            _blurredSnapshot = _blurPasses > 0 ? SnapshotBlur.Apply(ctx.RenderContext, texture, _blurPasses) : null;
+            _blurredSnapshot = _blurPasses > 0 ? SnapshotEffects.Apply(ctx.RenderContext, texture, _blurPasses) : null;
             _blurDirty = false;
         }
         texture = _blurredSnapshot ?? texture;

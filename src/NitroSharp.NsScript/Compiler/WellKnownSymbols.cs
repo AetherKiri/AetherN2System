@@ -21,8 +21,6 @@ internal static class WellKnownSymbols
         {
             s_builtInConstants[enumValue.ToString()] = enumValue;
         }
-        s_builtInConstants["Clickable"] = BuiltInConstant.Enter;
-        s_builtInConstants["UnClickable"] = BuiltInConstant.Erase;
     }
 
     public static BuiltInFunction? LookupBuiltInFunction(string name)
@@ -44,7 +42,6 @@ internal static class WellKnownSymbols
         return s switch
         {
             "UnLock" => "Unlock",
-            "UnClickable" => "Erase",
             "OverlayRender" => "AddRender",
             "Waitkey" => "WaitKey",
             "Wai" or "Wat" or "Waite" => "Wait",

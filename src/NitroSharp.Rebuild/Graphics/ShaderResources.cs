@@ -608,6 +608,7 @@ internal sealed class EffectShaderResources : IDisposable
     private readonly Pipeline _blit;
     private readonly Pipeline _grayscale;
     private readonly Pipeline _boxBlur;
+    private readonly Pipeline _sepia;
 
     public EffectShaderResources(
         GraphicsDevice graphicsDevice,
@@ -629,6 +630,7 @@ internal sealed class EffectShaderResources : IDisposable
         ));
 
         _blit = createPipeline("blit", ResourceLayout);
+        _sepia = createPipeline("sepia", ResourceLayout);
         _grayscale = createPipeline("grayscale", ResourceLayout);
         _boxBlur = createPipeline("boxblur", ResourceLayout);
         return;
@@ -638,7 +640,7 @@ internal sealed class EffectShaderResources : IDisposable
             (Shader vs, Shader fs) = shaderLibrary.LoadShaderSet(shaderSetName);
             var shaderSetDesc = new ShaderSetDescription([], [vs, fs]);
             var pipelineDesc = new GraphicsPipelineDescription(
-                shaderSetName == "boxblur" ? BlendStateDescription.SingleOverrideBlend : ShaderResources.PremultipliedAlpha,
+                shaderSetName is "boxblur" or "sepia" or "grayscale" ? BlendStateDescription.SingleOverrideBlend : ShaderResources.PremultipliedAlpha,
                 DepthStencilStateDescription.Disabled,
                 RasterizerStateDescription.CullNone,
                 PrimitiveTopology.TriangleStrip,
@@ -658,6 +660,7 @@ internal sealed class EffectShaderResources : IDisposable
         {
             EffectKind.Blit => _blit,
             EffectKind.Grayscale => _grayscale,
+            EffectKind.Sepia => _sepia,
             EffectKind.BoxBlur => _boxBlur,
             _ => throw ThrowHelper.UnexpectedValueOf<EffectKind>()
         };
@@ -668,6 +671,7 @@ internal sealed class EffectShaderResources : IDisposable
         _blit.Dispose();
         _grayscale.Dispose();
         _boxBlur.Dispose();
+        _sepia.Dispose();
         ResourceLayout.Dispose();
     }
 }

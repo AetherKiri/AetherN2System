@@ -3,6 +3,7 @@ using System.Numerics;
 using System.Threading;
 using NitroSharp.Content;
 using NitroSharp.Graphics.Core;
+using NitroSharp.NsScript;
 using Veldrid;
 
 namespace NitroSharp.Graphics;
@@ -12,8 +13,10 @@ internal partial class Sprite : RenderItem
     private readonly SpriteTexture _texture;
     private bool _disposed;
     private uint _blurPasses;
-    private bool _blurDirty;
-    private SpriteTexture? _blurredTexture;
+    internal NsTone Tone { get; private set; }
+    internal bool RetireWhenIdle { get; set; }
+    private bool _effectsDirty;
+    private SpriteTexture? _filteredTexture;
 
     public Sprite(EntityName name, Entity? parent, int priority, in SpriteTexture texture)
         : base(name, parent, priority)
@@ -27,7 +30,27 @@ internal partial class Sprite : RenderItem
     {
         if (_blurPasses == passes) return;
         _blurPasses = passes;
-        _blurDirty = true;
+        _effectsDirty = true;
+    }
+
+    public void SetTone(NsTone tone)
+    {
+        if (Tone == tone) return;
+        Tone = tone;
+        _effectsDirty = true;
+    }
+
+    public override bool Request(NsEntityAction action)
+    {
+        if (action != NsEntityAction.DestroyWhenIdle) return base.Request(action);
+        RetireWhenIdle = true;
+        return true;
+    }
+
+    public override void Update(GameContext ctx)
+    {
+        base.Update(ctx);
+        if (RetireWhenIdle && !IsLocked && !HasActiveAnimations) World.DestroyEntity(this);
     }
 
     public override DesignSize GetSize(RenderContext ctx)
@@ -43,8 +66,8 @@ internal partial class Sprite : RenderItem
         if (_disposed) return;
         _disposed = true;
         _texture.Dispose();
-        _blurredTexture?.Dispose();
-        _blurredTexture = null;
+        _filteredTexture?.Dispose();
+        _filteredTexture = null;
         base.Dispose();
     }
 
@@ -58,13 +81,14 @@ internal partial class Sprite : RenderItem
         //     alphaMaskPos = alphaMask.Transform.Position.XY();
         // }
 
-        if (_blurDirty)
+        if (_effectsDirty)
         {
-            _blurredTexture?.Dispose();
-            _blurredTexture = _blurPasses > 0 ? SnapshotBlur.Apply(ctx, _texture, _blurPasses) : null;
-            _blurDirty = false;
+            _filteredTexture?.Dispose();
+            _filteredTexture = _blurPasses > 0 || Tone != NsTone.None
+                ? SnapshotEffects.Apply(ctx, _texture, _blurPasses, Tone) : null;
+            _effectsDirty = false;
         }
-        SpriteTexture displayedTexture = _blurredTexture ?? _texture;
+        SpriteTexture displayedTexture = _filteredTexture ?? _texture;
         DesignSize size = GetSize(ctx);
         (Vector2 uvTopLeft, Vector2 uvBottomRight) = displayedTexture.GetTexCoords(ctx);
         var quad = QuadPrimitive.Create(

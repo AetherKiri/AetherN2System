@@ -109,6 +109,9 @@ internal abstract partial class RenderItem : Entity, IComparable<RenderItem>
         }
     }
 
+    protected bool HasActiveAnimations => _fadeAnimation is not null || _moveAnimation is not null
+        || _bezierMoveAnimation is not null || _scaleAnimation is not null || _rotationAnimation is not null || _transitionActive;
+
     public override bool IsAnimationActive(AnimationKind animationKind)
     {
         return animationKind switch

@@ -28,7 +28,8 @@ internal sealed class Thread : Entity, IVmThread
         IsMain = isMain;
     }
 
-    public Entity EntityContext => _callScopes.TryPeek(out CallScopeEntity? scope) ? scope : this;
+    public Entity EntityContext => _callScopes.TryPeek(out CallScopeEntity? scope) ? scope
+        : Parent is DialoguePage page ? page.ScriptScope ?? Process.MainThread.EntityContext : this;
 
     public void EnterCallScope()
     {

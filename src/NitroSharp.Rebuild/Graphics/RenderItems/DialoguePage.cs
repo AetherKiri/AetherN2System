@@ -27,6 +27,7 @@ internal sealed partial class DialoguePage : RenderItem
     private int _charactersSinceInput;
     private float _waitElapsed;
     private Thread? _codeThread;
+    internal Entity? ScriptScope { get; set; }
 
     public DialoguePage(EntityName name, Entity parent, int priority,
         in DialogueBlockToken token, uint maxWidth, uint maxHeight, int lineSpacing)
@@ -130,6 +131,10 @@ internal sealed partial class DialoguePage : RenderItem
                     _charactersSinceInput += _textAnimation.CharacterCount;
                     _unreadText = true;
                     if (IsRevealing) goto done;
+                }
+                else if (segment is VoiceSegment voice)
+                {
+                    ctx.Builtins.ApplyDialogueVoice(Process, voice, skip);
                 }
                 else if (segment is MarkerSegment { MarkerKind: MarkerKind.Halt })
                 {

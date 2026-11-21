@@ -298,6 +298,7 @@ internal sealed partial class Builtins : BuiltInFunctions
         {
             var page = _world.AddEntity(new DialoguePage(name, parent, box.Priority,
                 blockToken, maxWidth, maxHeight, lineSpacing));
+            page.ScriptScope = CurrentThread.EntityContext;
             page.Transform.Position = box.Transform.Position;
             page.SetAlias(EntityAlias.Parse(blockToken.BlockName));
         }
@@ -555,6 +556,24 @@ internal sealed partial class Builtins : BuiltInFunctions
         if (!ResolveEntityPath(entityPath, out EntityName name, out Entity? parent))
             return;
 
+        CreateAudio(name, parent, kind, fileName);
+    }
+
+    internal void ApplyDialogueVoice(Process process, VoiceSegment voice, bool skipping)
+    {
+        // All pages in a process share the dialogue channel and replace its previous line.
+        EntityName name = EntityName.Parse("dialogue-voice");
+        if (process.TryGetChild(name) is AudioEntity previous)
+        {
+            previous.Request(NsEntityAction.Stop);
+            _world.DestroyEntity(previous);
+        }
+        if (voice.Action == NsVoiceAction.Play && !skipping)
+            CreateAudio(name, process, NsAudioKind.Voice, voice.FileName)?.Request(NsEntityAction.Play);
+    }
+
+    private AudioEntity? CreateAudio(EntityName name, Entity? parent, NsAudioKind kind, string fileName)
+    {
         string sourcePath = fileName;
         if (!Path.HasExtension(sourcePath))
         {
@@ -573,11 +592,11 @@ internal sealed partial class Builtins : BuiltInFunctions
             if (stream is null)
             {
                 _log.Warn($"Audio file could not be opened: '{fileName}'");
-                return;
+                return null;
             }
         }
 
-        _world.AddEntity(new AudioEntity(
+        return _world.AddEntity(new AudioEntity(
             name,
             parent,
             () => OpenAudioStream(sourcePath)
@@ -667,6 +686,8 @@ internal sealed partial class Builtins : BuiltInFunctions
         waitTimeout = AdjustDuration(waitTimeout);
         foreach (Entity entity in Query(query))
         {
+            // Choice roots own independent visuals (including direct, always-visible icons).
+            if (entity is ChoiceEntity) continue;
             foreach (Entity node in entity.DescendantsAndSelf(selfFirst: false))
             {
                 node.Fade(dstOpacity, duration, easeFunction);
@@ -731,6 +752,13 @@ internal sealed partial class Builtins : BuiltInFunctions
             }
         }
         WaitOpt(Thread.WaitCondition.BezierMoveCompleted, query, wait ? duration : TimeSpan.Zero);
+    }
+
+    public override void SetTone(in EntityQuery query, NsTone tone)
+    {
+        foreach (Entity entity in Query(query))
+            foreach (Entity node in entity.DescendantsAndSelf())
+                if (node is Sprite sprite) sprite.SetTone(tone);
     }
 
     public override void BoxBlur(in EntityQuery query, uint nbPasses)

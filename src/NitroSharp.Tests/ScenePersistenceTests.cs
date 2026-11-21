@@ -44,6 +44,10 @@ public sealed class ScenePersistenceTests
         var knob = ctx.World.AddEntity(new Scrollbar(EntityName.Parse("scroll"), scope, 9,
             SpriteTexture.SolidColor(RgbaFloat.White, new DesignSizeU(10, 20)),
             Vector2.Zero, new Vector2(100, 0), NsScrollDirection.Horizontal, .25f));
+        var sprite = ctx.World.AddEntity(new Sprite(EntityName.Parse("plate"), scope, 11,
+            SpriteTexture.SolidColor(RgbaFloat.White, new DesignSizeU(8, 8))));
+        sprite.SetTone(NsTone.Sepia);
+        sprite.Request(NsEntityAction.DestroyWhenIdle);
         knob.ScrollTarget = visual; knob.ScrollSpeed = 3;
         visual.SetAlias(EntityAlias.Parse("active-image"));
         ctx.World.BeginFrame();
@@ -70,6 +74,9 @@ public sealed class ScenePersistenceTests
         Assert.True(restoredVisual.IsHidden); Assert.True(restoredVisual.IsLocked);
         Assert.Equal(BlendMode.Additive, restoredVisual.BlendMode);
         var restoredKnob = (Scrollbar)restoredScope.TryGetChild(EntityName.Parse("scroll"))!;
+        var restoredPlate = Assert.IsType<Sprite>(restoredScope.TryGetChild(EntityName.Parse("plate")));
+        Assert.Equal(NsTone.Sepia, restoredPlate.Tone);
+        Assert.True(restoredPlate.RetireWhenIdle);
         Assert.Same(restoredVisual, restoredKnob.ScrollTarget);
         Assert.Equal(.25f, restoredKnob.Value); Assert.Equal(3, restoredKnob.ScrollSpeed);
         ctx.World.BeginFrame();

@@ -22,6 +22,12 @@ chapter main
     WaitKey();
     SetShade("sprite", null);
     WaitKey();
+    SetTone("spr*", Sepia);
+    WaitKey();
+    SetTone("sprite", Monochrome);
+    WaitKey();
+    SetTone("sprite", null);
+    WaitKey();
     Delete("sprite");
     Exit();
 }

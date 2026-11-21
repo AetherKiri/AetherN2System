@@ -18,6 +18,10 @@ internal sealed partial class ChoiceEntity(EntityName name, Entity? parent, bool
     {
         switch (action)
         {
+            // The host draws its own pointer. Neither cursor hint disables selection.
+            case NsEntityAction.UseHandCursor:
+            case NsEntityAction.UseArrowCursor:
+                return true;
             case NsEntityAction.Disable:
                 IsClickable = false;
                 ShowState(MouseState.Normal);

@@ -145,6 +145,8 @@
         ケータイアナウンス,
         Passive,
         SemiHeavy,
-        Light
+        Light,
+        Clickable,
+        UnClickable
     }
 }
