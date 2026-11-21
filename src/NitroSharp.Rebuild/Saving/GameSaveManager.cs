@@ -18,6 +18,17 @@ internal sealed class GameSaveManager
     private readonly GameContext _ctx;
     private readonly SaveSlotStorage _storage;
     private readonly Queue<uint> _pendingSaves = new();
+    // Read history belongs to the installation, not a particular slot. Only append newly completed blocks.
+    private readonly HashSet<string> _readDialogue = new(StringComparer.Ordinal);
+    private string ReadHistoryPath => Path.Combine(_storage.DirectoryPath, "read-dialogue-v1.txt");
+    internal bool HasRead(string key) => _readDialogue.Contains(key);
+    internal void MarkRead(string key)
+    {
+        if (!_readDialogue.Add(key)) return;
+        try { File.AppendAllLines(ReadHistoryPath, [key]); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { _ctx.RootLog.Warn($"Cannot persist dialogue history: {error.Message}"); }
+    }
     private byte[]? _pendingLoad;
     private byte[]? _storyThumbnail;
 
@@ -32,6 +43,12 @@ internal sealed class GameSaveManager
             context.Profile.ProductName, context.Profile.Name);
         Directory.CreateDirectory(_storage.DirectoryPath);
         context.RootLog.Info($"N2System savedata directory: {_storage.DirectoryPath}");
+        try
+        {
+            if (File.Exists(ReadHistoryPath)) _readDialogue.UnionWith(File.ReadLines(ReadHistoryPath));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { context.RootLog.Warn($"Cannot load dialogue history: {error.Message}"); }
         UpdateSavePath();
         if (_storage.Exists(0)) RequestLoad(0);
     }

@@ -170,11 +170,11 @@ internal sealed class Thread : Entity, IVmThread
         return true;
     }
 
-    internal bool InterruptVideoWait(InputContext input)
+    internal bool InterruptVideoWait(InputContext input, bool skip = false)
     {
         if (_waitOperation is not { Condition: WaitCondition.MediaCompleted, Videos.Length: > 0 } wait || MediaCompleted(wait))
             return false;
-        bool pressed = input.ConsumeMovieInterrupt();
+        bool pressed = skip || input.ConsumeMovieInterrupt();
         if (!pressed || !wait.AllowMovieSkip) return false;
         foreach (Video video in wait.Videos ?? []) video.Request(NsEntityAction.Stop);
         return true;
@@ -203,11 +203,13 @@ internal sealed class Thread : Entity, IVmThread
         }
 
         InputContext input = ctx.InputContext;
+        bool skip = ctx.StorySkipping;
+        if (skip && waitOperation.Condition == WaitCondition.Timeout) return true;
         InterruptFrameSequenceWait(input);
-        InterruptVideoWait(input);
+        InterruptVideoWait(input, skip);
         return waitOperation switch
         {
-            { Condition: WaitCondition.UserInput } => input.Consume(InputAction.Advance),
+            { Condition: WaitCondition.UserInput } => (skip && IsMain) || input.Consume(InputAction.Advance),
             { Condition: WaitCondition.EntityIdle, EntityQuery: { } query } => isTextIdle(query),
             { Condition: WaitCondition.FrameSequenceCompleted } => FrameSequencesCompleted(waitOperation),
             { Condition: WaitCondition.MediaCompleted } => MediaCompleted(waitOperation),

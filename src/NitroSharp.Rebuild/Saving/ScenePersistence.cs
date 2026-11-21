@@ -37,7 +37,7 @@ namespace NitroSharp.Saving
                 : throw new InvalidOperationException($"Save references an entity outside the scene: {entity.GetAbsolutePath()}");
             using var output = new MemoryStream();
             using var writer = new BinaryWriter(output, Encoding.UTF8, leaveOpen: true);
-            writer.Write(-2);
+            writer.Write(-3);
             writer.Write(entities.Count);
             foreach (Entity entity in entities)
             {
@@ -102,7 +102,8 @@ namespace NitroSharp.Saving
             using var input = new MemoryStream(data, writable: false);
             using var reader = new BinaryReader(input, Encoding.UTF8);
             int count = reader.ReadInt32();
-            bool extended = count == -2;
+            bool hasHideable = count == -3;
+            bool extended = count == -2 || hasHideable;
             if (extended) count = SaveIO.ReadCount(reader, 100_000);
             if (count is <= 0 or > 100_000) throw new InvalidDataException("The saved scene is empty.");
             var entities = new List<Entity>(count);
@@ -146,7 +147,7 @@ namespace NitroSharp.Saving
                     entities.Add(entity);
                     if (entity is Process p) process = p;
                     ctx.World.AddEntity(entity, enableNextFrame: false);
-                    if (entity is RenderItem visual) visual.ReadRenderSave(reader, ctx);
+                    if (entity is RenderItem visual) visual.ReadRenderSave(reader, ctx, hasHideable);
                     if (enabled) entity.Enable(); else entity.Disable();
                     if (locked) entity.Request(NsEntityAction.Lock);
 
@@ -415,7 +416,7 @@ namespace NitroSharp.Graphics
             SaveIO.WriteVector(w, Transform.Position); SaveIO.WriteVector(w, Transform.Scale);
             SaveIO.WriteVector(w, Transform.Rotation); w.Write(Transform.Pivot.HasValue);
             if (Transform.Pivot is { } pivot) SaveIO.WriteVector(w, pivot);
-            SaveIO.WriteColor(w, Color); w.Write(IsHidden); w.Write((int)BlendMode); w.Write((int)FilterMode);
+            SaveIO.WriteColor(w, Color); w.Write(IsHidden); w.Write(HidesWithText); w.Write((int)BlendMode); w.Write((int)FilterMode);
             AnimationPersistence.Write(w, _fadeAnimation); AnimationPersistence.Write(w, _moveAnimation);
             AnimationPersistence.Write(w, _bezierMoveAnimation); AnimationPersistence.Write(w, _scaleAnimation);
             AnimationPersistence.Write(w, _rotationAnimation);
@@ -423,14 +424,14 @@ namespace NitroSharp.Graphics
             if (_transition is { } transition) transition.WriteMaskSave(w);
             w.Write(_transitionActive);
         }
-        internal void ReadRenderSave(BinaryReader r, GameContext ctx)
+        internal void ReadRenderSave(BinaryReader r, GameContext ctx, bool hasHideable)
         {
             int drawId = r.ReadInt32();
             if (drawId < 0 || drawId == int.MaxValue) throw new InvalidDataException("Invalid saved draw order.");
             _key = new RenderItemKey(Priority, drawId); s_lastId = Math.Max(s_lastId, drawId + 1);
             Transform.Position = SaveIO.ReadVector3(r); Transform.Scale = SaveIO.ReadVector3(r);
             Transform.Rotation = SaveIO.ReadVector3(r); Transform.Pivot = r.ReadBoolean() ? SaveIO.ReadVector2(r) : null;
-            Color = SaveIO.ReadColor(r); IsHidden = r.ReadBoolean();
+            Color = SaveIO.ReadColor(r); IsHidden = r.ReadBoolean(); HidesWithText = hasHideable && r.ReadBoolean();
             BlendMode = (BlendMode)r.ReadInt32(); FilterMode = (FilterMode)r.ReadInt32();
             _fadeAnimation = (OpacityAnimation?)AnimationPersistence.Read(r, this);
             _moveAnimation = (MoveAnimation?)AnimationPersistence.Read(r, this);

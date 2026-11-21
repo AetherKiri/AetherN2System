@@ -559,14 +559,17 @@ internal sealed class JsonObjectBuilder
             string archiveName = Path.GetFileName(path);
             if (!mountedArchives.Add(archiveName))
                 continue;
-            mounts.Add(
-                (System.Text.Json.Nodes.JsonNode)
-                    new System.Text.Json.Nodes.JsonObject
-                    {
-                        ["mount"] = MountName(Path.GetFileNameWithoutExtension(path)),
-                        ["archive"] = archiveName,
-                    }
-            );
+            string stem = Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+            string overlay = MountName(stem);
+            AddMount(overlay);
+            // Split packs are overlays, but scripts can also address the numbered pack directly.
+            if (stem is "cg2" or "sound2" or "voice2") AddMount(stem);
+
+            void AddMount(string name) => mounts.Add((System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+            {
+                ["mount"] = name,
+                ["archive"] = archiveName,
+            });
         }
         _root["dev.mounts"] = mounts;
     }

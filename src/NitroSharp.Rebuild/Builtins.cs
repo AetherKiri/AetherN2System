@@ -850,9 +850,7 @@ internal sealed partial class Builtins : BuiltInFunctions
 
     private TimeSpan AdjustDuration(TimeSpan duration)
     {
-        return false
-            ? TimeSpan.FromSeconds(duration.TotalSeconds / 10.0d)
-            : duration;
+        return _ctx.StorySkipping ? TimeSpan.Zero : duration;
     }
 
     public override void SetAlias(in EntityQuery query, in EntityAlias alias)

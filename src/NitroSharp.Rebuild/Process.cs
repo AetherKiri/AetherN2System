@@ -46,9 +46,10 @@ internal sealed partial class Process : Entity
     {
         _renderList.Clear();
 
+        bool eraseText = ctx.VM.SystemVariables.IsTextErased;
         foreach (RenderItem renderItem in GetDescendants<RenderItem>())
         {
-            if (renderItem.IsHidden || !AreMouseStatesVisible(renderItem))
+            if (renderItem.IsHidden || (eraseText && renderItem.HidesWithText) || !AreMouseStatesVisible(renderItem))
                 continue;
             _renderList.Add(renderItem);
         }

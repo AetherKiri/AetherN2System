@@ -34,6 +34,7 @@ public enum NsEntityAction
     Passive,
     UseHandCursor,
     UseArrowCursor,
+    HideWithText,
 }
 
 public enum NsEaseFunction

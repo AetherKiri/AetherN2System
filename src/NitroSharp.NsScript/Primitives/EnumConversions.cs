@@ -10,6 +10,7 @@ internal static class EnumConversions
             BuiltInConstant.Unlock => NsEntityAction.Unlock,
             BuiltInConstant.Clickable => NsEntityAction.UseHandCursor,
             BuiltInConstant.UnClickable => NsEntityAction.UseArrowCursor,
+            BuiltInConstant.Hideable => NsEntityAction.HideWithText,
             BuiltInConstant.Disused => NsEntityAction.DestroyWhenIdle,
             BuiltInConstant.Erase => NsEntityAction.Disable,
             BuiltInConstant.Enter => NsEntityAction.Enable,

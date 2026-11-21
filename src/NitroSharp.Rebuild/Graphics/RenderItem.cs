@@ -51,11 +51,15 @@ internal abstract partial class RenderItem : Entity, IComparable<RenderItem>
     public BlendMode BlendMode { get; set; } = BlendMode.Alpha;
     public FilterMode FilterMode { get; set; } = FilterMode.Linear;
     public bool IsHidden { get; private set; }
+    public bool HidesWithText { get; private set; }
 
     public override bool Request(NsEntityAction action)
     {
         switch (action)
         {
+            case NsEntityAction.HideWithText:
+                HidesWithText = true;
+                return true;
             case NsEntityAction.Disable:
                 IsHidden = true;
                 return true;
@@ -77,12 +81,13 @@ internal abstract partial class RenderItem : Entity, IComparable<RenderItem>
 
     public override void Update(GameContext ctx)
     {
-        AdvanceAnimation(ref _fadeAnimation, ctx.DeltaTime);
-        AdvanceAnimation(ref _moveAnimation, ctx.DeltaTime);
-        AdvanceAnimation(ref _bezierMoveAnimation, ctx.DeltaTime);
-        AdvanceAnimation(ref _scaleAnimation, ctx.DeltaTime);
-        AdvanceAnimation(ref _rotationAnimation, ctx.DeltaTime);
-        if (_transitionActive && _transition?.Update(ctx.DeltaTime) is false) _transitionActive = false;
+        bool finish = ctx.StorySkipping;
+        AdvanceAnimation(ref _fadeAnimation, ctx.DeltaTime, finish);
+        AdvanceAnimation(ref _moveAnimation, ctx.DeltaTime, finish);
+        AdvanceAnimation(ref _bezierMoveAnimation, ctx.DeltaTime, finish);
+        AdvanceAnimation(ref _scaleAnimation, ctx.DeltaTime, finish);
+        AdvanceAnimation(ref _rotationAnimation, ctx.DeltaTime, finish);
+        if (_transitionActive && _transition?.Update(ctx.DeltaTime, finish) is false) _transitionActive = false;
 
         PerformLayout(ctx, null);
     }
@@ -100,10 +105,10 @@ internal abstract partial class RenderItem : Entity, IComparable<RenderItem>
         // }
     }
 
-    protected static void AdvanceAnimation<T>(ref T? anim, float dt)
-        where T : Animation
+    protected static void AdvanceAnimation<T>(ref T? anim, float dt, bool finish)
+        where T : AnimationWithDuration
     {
-        if (anim?.Update(dt) is false)
+        if (anim?.Update(dt, finish) is false)
         {
             anim = null;
         }

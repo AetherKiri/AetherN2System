@@ -39,6 +39,7 @@ public sealed class SystemVariableLookup
 
     private int _lastText;
     private int _skip;
+    private int _skipExpress;
     private int _textAuto;
     private int _textErase;
     private int _textAutoLock;
@@ -95,6 +96,7 @@ public sealed class SystemVariableLookup
         _positionYTextIcon = Lookup("SYSTEM_position_y_text_icon");
         _lastText = Lookup("SYSTEM_last_text");
         _skip = Lookup("SYSTEM_skip");
+        _skipExpress = _vm.GlobalsLookup.Flags.TryGetValue("SYSTEM_skip_express", out int express) ? express : -1;
         _textAuto = Lookup("SYSTEM_text_auto");
         _textErase = Lookup("SYSTEM_text_erase");
         _textAutoLock = Lookup("SYSTEM_text_auto_lock");
@@ -194,6 +196,15 @@ public sealed class SystemVariableLookup
     public ref ConstantValue SavePath => ref Flag(_savePath);
 
     public ref ConstantValue LastText => ref Var(_lastText);
+
+    public bool IsSkipping => _skip >= 0 && (_vm.GetVariable(_skip).AsBool() ?? false);
+    public bool IsTextErased => _textErase >= 0 && (_vm.GetVariable(_textErase).AsBool() ?? false);
+
+    public void CancelSkip()
+    {
+        if (_skip >= 0) _vm.GetVariable(_skip) = ConstantValue.False;
+        if (_skipExpress >= 0) _vm.GetFlag(_skipExpress) = ConstantValue.False;
+    }
 
     public ref ConstantValue Skip => ref Var(_skip);
     public ref ConstantValue TextAuto => ref Var(_textAuto);

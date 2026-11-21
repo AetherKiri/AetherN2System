@@ -78,7 +78,7 @@
         NoIcon,
         CompulsorySuspend,
         EntrustSuspend,
-        Hideable,           // Possibly a no-op
+        Hideable,
 
         // Used by CreateTexture
         SCREEN,
