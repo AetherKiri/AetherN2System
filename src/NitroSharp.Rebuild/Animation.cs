@@ -71,6 +71,12 @@ internal abstract partial class Animation
         return false;
     }
 
+    protected void Seek(float milliseconds)
+    {
+        _initialized = true;
+        _elapsed = milliseconds;
+    }
+
     public void Reset()
     {
         _elapsed = 0;
@@ -109,6 +115,12 @@ internal abstract partial class AnimationWithDuration : Animation
         : base(easeFunction, repeat)
     {
         _duration = duration;
+    }
+
+    public bool Update(float dt, bool finish)
+    {
+        if (finish) Seek((float)Math.Ceiling(_duration.TotalMilliseconds) + 1);
+        return Update(dt);
     }
 
     public bool HasCompleted => Elapsed >= _duration.TotalMilliseconds;

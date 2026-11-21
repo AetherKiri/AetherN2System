@@ -215,6 +215,7 @@ internal sealed class World : EntityScope
         }
         if (!IsSystemMenu)
         {
+            ctx.InputContext.CancelScriptSkip(ctx.VM.SystemVariables);
             if (ctx.InputContext.Consume(InputAction.QuickSave) && !ReadLock(ctx, "SYSTEM_save_lock"))
                 ctx.Saves.RequestSave(9998);
             if (ctx.InputContext.Consume(InputAction.QuickLoad) && !ReadLock(ctx, "SYSTEM_load_lock"))

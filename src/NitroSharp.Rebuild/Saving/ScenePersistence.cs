@@ -37,6 +37,7 @@ namespace NitroSharp.Saving
                 : throw new InvalidOperationException($"Save references an entity outside the scene: {entity.GetAbsolutePath()}");
             using var output = new MemoryStream();
             using var writer = new BinaryWriter(output, Encoding.UTF8, leaveOpen: true);
+            writer.Write(-3);
             writer.Write(entities.Count);
             foreach (Entity entity in entities)
             {
@@ -54,11 +55,19 @@ namespace NitroSharp.Saving
                     case Thread thread: thread.WriteSave(writer, ctx.VM, Id, ctx.Clock.Elapsed); break;
                     case Image image: image.Texture.WriteSave(writer, ctx); break;
                     case Scrollbar scrollbar: scrollbar.WriteScrollbarSave(writer, ctx, Id); break;
-                    case Sprite sprite: sprite.Texture.WriteSave(writer, ctx); writer.Write(sprite.SaveBlurPasses); break;
+                    case Sprite sprite:
+                        sprite.Texture.WriteSave(writer, ctx);
+                        writer.Write(sprite.SaveBlurPasses);
+                        writer.Write((byte)sprite.Tone);
+                        writer.Write(sprite.RetireWhenIdle);
+                        break;
                     case SolidColorRect solid: SaveIO.WriteSize(writer, solid.GetSize(ctx.RenderContext)); break;
                     case DialogueBox box:
                         SaveIO.WriteSize(writer, box.GetSize(ctx.RenderContext)); writer.Write(box.IsContainer); break;
-                    case DialoguePage page: page.WritePageSave(writer, ctx, Id); break;
+                    case DialoguePage page:
+                        writer.Write(page.ScriptScope is { IsPendingDestruction: false } scope ? Id(scope) : -1);
+                        page.WritePageSave(writer, ctx, Id);
+                        break;
                     case TextBlock text: text.WriteTextSave(writer); break;
                     case FrameSequence sequence: sequence.WriteSequenceSave(writer); break;
                     case AudioEntity audio: audio.WriteAudioSave(writer); break;
@@ -92,8 +101,11 @@ namespace NitroSharp.Saving
         {
             using var input = new MemoryStream(data, writable: false);
             using var reader = new BinaryReader(input, Encoding.UTF8);
-            int count = SaveIO.ReadCount(reader, 100_000);
-            if (count == 0) throw new InvalidDataException("The saved scene is empty.");
+            int count = reader.ReadInt32();
+            bool hasHideable = count == -3;
+            bool extended = count == -2 || hasHideable;
+            if (extended) count = SaveIO.ReadCount(reader, 100_000);
+            if (count is <= 0 or > 100_000) throw new InvalidDataException("The saved scene is empty.");
             var entities = new List<Entity>(count);
             var resolve = new List<Action<IReadOnlyList<Entity>>>();
             Process? process = null;
@@ -121,7 +133,7 @@ namespace NitroSharp.Saving
                         Kind.Sprite => ReadSprite(),
                         Kind.SolidColor => new SolidColorRect(name, parent, priority, RgbaFloat.White, SaveIO.ReadSize(reader)),
                         Kind.DialogueBox => new DialogueBox(name, parent, priority, SaveIO.ReadSize(reader), reader.ReadBoolean()),
-                        Kind.DialoguePage => DialoguePage.ReadPageSave(name, parent!, priority, reader, ctx, resolve),
+                        Kind.DialoguePage => ReadPage(),
                         Kind.TextBlock => TextBlock.ReadTextSave(name, parent!, priority, reader, ctx),
                         Kind.FrameSequence => FrameSequence.ReadSequenceSave(name, parent, priority, reader, ctx),
                         Kind.Audio => AudioEntity.ReadAudioSave(name, parent, reader, ctx),
@@ -135,7 +147,7 @@ namespace NitroSharp.Saving
                     entities.Add(entity);
                     if (entity is Process p) process = p;
                     ctx.World.AddEntity(entity, enableNextFrame: false);
-                    if (entity is RenderItem visual) visual.ReadRenderSave(reader, ctx);
+                    if (entity is RenderItem visual) visual.ReadRenderSave(reader, ctx, hasHideable);
                     if (enabled) entity.Enable(); else entity.Disable();
                     if (locked) entity.Request(NsEntityAction.Lock);
 
@@ -145,10 +157,28 @@ namespace NitroSharp.Saving
                         resolve.Add(references);
                         return thread;
                     }
+                    DialoguePage ReadPage()
+                    {
+                        int owner = extended ? reader.ReadInt32() : -1;
+                        var page = DialoguePage.ReadPageSave(name, parent!, priority, reader, ctx, resolve);
+                        if (owner >= 0) resolve.Add(list => page.ScriptScope = SaveIO.EntityAt(list, owner));
+                        return page;
+                    }
                     Sprite ReadSprite()
                     {
                         var sprite = new Sprite(name, parent, priority, SpriteTexture.ReadSave(reader, ctx));
-                        try { sprite.SetBlur(reader.ReadUInt32()); return sprite; }
+                        try
+                        {
+                            sprite.SetBlur(reader.ReadUInt32());
+                            if (extended)
+                            {
+                                var tone = (NsTone)reader.ReadByte();
+                                if (!Enum.IsDefined(tone)) throw new InvalidDataException("Invalid saved sprite tone.");
+                                sprite.SetTone(tone);
+                                sprite.RetireWhenIdle = reader.ReadBoolean();
+                            }
+                            return sprite;
+                        }
                         catch { sprite.Dispose(); throw; }
                     }
                 }
@@ -386,7 +416,7 @@ namespace NitroSharp.Graphics
             SaveIO.WriteVector(w, Transform.Position); SaveIO.WriteVector(w, Transform.Scale);
             SaveIO.WriteVector(w, Transform.Rotation); w.Write(Transform.Pivot.HasValue);
             if (Transform.Pivot is { } pivot) SaveIO.WriteVector(w, pivot);
-            SaveIO.WriteColor(w, Color); w.Write(IsHidden); w.Write((int)BlendMode); w.Write((int)FilterMode);
+            SaveIO.WriteColor(w, Color); w.Write(IsHidden); w.Write(HidesWithText); w.Write((int)BlendMode); w.Write((int)FilterMode);
             AnimationPersistence.Write(w, _fadeAnimation); AnimationPersistence.Write(w, _moveAnimation);
             AnimationPersistence.Write(w, _bezierMoveAnimation); AnimationPersistence.Write(w, _scaleAnimation);
             AnimationPersistence.Write(w, _rotationAnimation);
@@ -394,14 +424,14 @@ namespace NitroSharp.Graphics
             if (_transition is { } transition) transition.WriteMaskSave(w);
             w.Write(_transitionActive);
         }
-        internal void ReadRenderSave(BinaryReader r, GameContext ctx)
+        internal void ReadRenderSave(BinaryReader r, GameContext ctx, bool hasHideable)
         {
             int drawId = r.ReadInt32();
             if (drawId < 0 || drawId == int.MaxValue) throw new InvalidDataException("Invalid saved draw order.");
             _key = new RenderItemKey(Priority, drawId); s_lastId = Math.Max(s_lastId, drawId + 1);
             Transform.Position = SaveIO.ReadVector3(r); Transform.Scale = SaveIO.ReadVector3(r);
             Transform.Rotation = SaveIO.ReadVector3(r); Transform.Pivot = r.ReadBoolean() ? SaveIO.ReadVector2(r) : null;
-            Color = SaveIO.ReadColor(r); IsHidden = r.ReadBoolean();
+            Color = SaveIO.ReadColor(r); IsHidden = r.ReadBoolean(); HidesWithText = hasHideable && r.ReadBoolean();
             BlendMode = (BlendMode)r.ReadInt32(); FilterMode = (FilterMode)r.ReadInt32();
             _fadeAnimation = (OpacityAnimation?)AnimationPersistence.Read(r, this);
             _moveAnimation = (MoveAnimation?)AnimationPersistence.Read(r, this);

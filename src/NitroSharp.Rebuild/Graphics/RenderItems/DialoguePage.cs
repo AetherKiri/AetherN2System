@@ -11,6 +11,7 @@ namespace NitroSharp.Graphics;
 internal sealed partial class DialoguePage : RenderItem
 {
     private readonly DialogueBlockToken _token;
+    private readonly string _readKey;
     private readonly CompiledDialogueBlock _block;
     private readonly TextLayout _layout;
     private bool _verticalGlyphs;
@@ -27,6 +28,7 @@ internal sealed partial class DialoguePage : RenderItem
     private int _charactersSinceInput;
     private float _waitElapsed;
     private Thread? _codeThread;
+    internal Entity? ScriptScope { get; set; }
 
     public DialoguePage(EntityName name, Entity parent, int priority,
         in DialogueBlockToken token, uint maxWidth, uint maxHeight, int lineSpacing)
@@ -36,6 +38,8 @@ internal sealed partial class DialoguePage : RenderItem
         base.Request(NsEntityAction.Disable);
         SaveLineSpacing = lineSpacing;
         _token = token;
+        _readKey = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+            $"{token.Module.Name}\0{token.Module.GetSubroutineName(token.SubroutineIndex)}\0{token.BlockName}"));
         _verticalGlyphs = parent.Process.FontSettings.VerticalGlyphs;
         _block = token.Module.GetSubroutine(token.SubroutineIndex).DialogueBlocks[token.Offset];
         _layout = new TextLayout(maxWidth, maxHeight,
@@ -73,15 +77,20 @@ internal sealed partial class DialoguePage : RenderItem
         base.Update(ctx);
         if (!_entered || IsPendingDestruction) return;
         ctx.RenderContext.Text.RequestGlyphs(_layout);
-        if (ctx.VM.SystemVariables.TextErase.AsBool() ?? false)
+        if (ctx.VM.SystemVariables.IsTextErased)
         {
             if (ctx.InputContext.Consume(InputAction.Advance))
                 ctx.VM.SystemVariables.TextErase = ConstantValue.False;
             return;
         }
         var settings = ctx.VM.SystemVariables.GetTextSettings();
-        bool skip = (ctx.VM.SystemVariables.Skip.AsBool() ?? false)
-            || ctx.InputContext.IsActionHeld(InputAction.Skip);
+        bool skip = ctx.StorySkipping;
+        if (skip && !IsIdle && !(ctx.VM.GetHostFlag("SYSTEM_skip_absolute").AsBool() ?? false)
+            && !ctx.Saves.HasRead(_readKey))
+        {
+            ctx.VM.SystemVariables.CancelSkip();
+            skip = false;
+        }
         if (IsRevealing)
         {
             if (skip || _disableTextAnimation
@@ -131,6 +140,10 @@ internal sealed partial class DialoguePage : RenderItem
                     _unreadText = true;
                     if (IsRevealing) goto done;
                 }
+                else if (segment is VoiceSegment voice)
+                {
+                    ctx.Builtins.ApplyDialogueVoice(Process, voice, skip);
+                }
                 else if (segment is MarkerSegment { MarkerKind: MarkerKind.Halt })
                 {
                     _waitingForInput = true;
@@ -146,6 +159,7 @@ internal sealed partial class DialoguePage : RenderItem
                     _unreadText = false;
                     goto done;
                 }
+                if (!ctx.World.IsSystemMenu) ctx.Saves.MarkRead(_readKey);
                 IsIdle = true;
                 break;
             }
@@ -197,7 +211,7 @@ internal sealed partial class DialoguePage : RenderItem
 
     public override void Render(GameContext ctx)
     {
-        if (!_entered || IsPendingDestruction || (ctx.VM.SystemVariables.TextErase.AsBool() ?? false)) return;
+        if (!_entered || IsPendingDestruction || ctx.VM.SystemVariables.IsTextErased) return;
         RenderContext render = ctx.RenderContext;
         render.Text.Render(render, render.MainBatch, _layout,
             render.GetTransformMatrix(Transform, GetSize(render), useScaling: true, aligned: false),

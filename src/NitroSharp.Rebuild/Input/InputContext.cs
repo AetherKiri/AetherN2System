@@ -77,6 +77,24 @@ internal sealed class InputContext(GameWindow window) : IDisposable
         return advance || rightClick || Snapshot.KeyState(Key.LeftShift) || Snapshot.KeyState(Key.RightShift);
     }
 
+    internal void CancelScriptSkip(SystemVariableLookup sys)
+    {
+        if (!sys.IsSkipping || !(WasActionTriggered(InputAction.Advance) || WasActionTriggered(InputAction.Back)
+            || Snapshot.WheelDelta.Y != 0)) return;
+
+        sys.CancelSkip();
+        // The interrupt is not a second command to select, advance or open a menu.
+        Consume(InputAction.Advance);
+        Consume(InputAction.Enter);
+        Consume(InputAction.Back);
+        if (Snapshot.WheelDelta.Y != 0)
+        {
+            Consume(InputAction.Up);
+            Consume(InputAction.Down);
+        }
+        _choicePressConsumed = true;
+    }
+
     internal bool ConsumeMovieInterrupt()
     {
         bool pressed = Snapshot.IsMouseDown(MouseButton.Left) || Snapshot.IsMouseDown(MouseButton.Right)

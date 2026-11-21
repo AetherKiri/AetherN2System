@@ -852,6 +852,8 @@ namespace NitroSharp.NsScript.Syntax
 
         private void ScanMultiLineComment()
         {
+            AdvanceChar(2);
+            int depth = 1;
             char c;
             bool isInsideQuotes = false;
             while ((c = PeekChar()) != EofCharacter)
@@ -863,9 +865,14 @@ namespace NitroSharp.NsScript.Syntax
 
                  switch (c)
                  {
+                     case '/' when PeekChar(1) == '*' && !isInsideQuotes:
+                         AdvanceChar(2);
+                         depth++;
+                         break;
                      case '*' when PeekChar(1) == '/' && !isInsideQuotes:
                          AdvanceChar(2);
-                         return;
+                         if (--depth == 0) return;
+                         break;
                      case '"':
                          isInsideQuotes = !isInsideQuotes;
                          goto default;

@@ -32,6 +32,9 @@ public enum NsEntityAction
 
     Other,
     Passive,
+    UseHandCursor,
+    UseArrowCursor,
+    HideWithText,
 }
 
 public enum NsEaseFunction
@@ -55,6 +58,8 @@ public enum NsAudioKind
     SoundEffect,
     Voice
 }
+
+public enum NsTone : byte { None, Monochrome, Sepia }
 
 public enum NsVoiceAction
 {

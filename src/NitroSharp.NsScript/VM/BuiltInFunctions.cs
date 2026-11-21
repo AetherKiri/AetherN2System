@@ -119,6 +119,12 @@ public abstract class BuiltInFunctions
     public virtual void WaitText(in EntityQuery query, TimeSpan timeout) { NotImplemented(); }
 
     public virtual void BoxBlur(in EntityQuery query, uint nbPasses) { NotImplemented(); }
+    public virtual void SetTone(in EntityQuery query, NsTone tone)
+    {
+        if (tone == NsTone.Monochrome) Grayscale(query);
+        else NotImplemented();
+    }
+
     public virtual void Grayscale(in EntityQuery query) { NotImplemented(); }
 
     public virtual void CreateEffect(in EntityPath entityPath, int priority, NsCoordinate x, NsCoordinate y, uint width, uint height, string effectName) { NotImplemented(); }

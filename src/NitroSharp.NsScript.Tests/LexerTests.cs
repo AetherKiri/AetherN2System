@@ -69,6 +69,13 @@ public class LexerTests
     }
 
     [Fact]
+    public void NestedCommentDoesNotExposeDisabledFunctions()
+    {
+        var result = SyntaxToken.Lex("/* disabled\n/* divider */\nfunction obsolete() {}\n*/ true");
+        Assert.Equal(SyntaxTokenKind.TrueKeyword, result.SingleToken().Kind);
+    }
+
+    [Fact]
     public void EmptyString()
     {
         var lexResult = SyntaxToken.Lex("");

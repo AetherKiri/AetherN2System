@@ -92,7 +92,12 @@ internal sealed class NpaFile : ArchiveFile
         byte[] data = new byte[entry.StoredSize];
         input.ReadExactly(data);
         if (_cipher is not null) DecryptPrefix(data, entry, _cipher);
-        if (IsPacked(path, entry))
+        // A recompressed PNG can have exactly its original size. Inspect the decrypted
+        // header before treating an equal-length image entry as stored verbatim.
+        bool wrappedPng = _compressed && path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
+            && data.Length >= 2 && (data[0] & 15) == 8 && (data[0] >> 4) <= 7
+            && ((data[0] << 8) + data[1]) % 31 == 0;
+        if (IsPacked(path, entry) || wrappedPng)
         {
             using var packed = new MemoryStream(data, writable: false);
             using var inflater = new ZLibStream(packed, CompressionMode.Decompress);

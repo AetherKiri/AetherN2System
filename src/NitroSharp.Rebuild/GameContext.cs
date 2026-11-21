@@ -53,6 +53,9 @@ internal sealed class GameContext : IDisposable
     internal required Log RootLog { get; init; }
     internal CancellationTokenSource ShutdownSignal { get; } = new();
 
+    internal bool StorySkipping => !World.IsSystemMenu && !(VM.GetHostVariable("SYSTEM_skip_lock").AsBool() ?? false)
+        && (VM.SystemVariables.IsSkipping || InputContext.IsActionHeld(InputAction.Skip));
+
     internal float DeltaTime { get; private set; }
     internal FrameStamp FrameStamp { get; private set; }
 

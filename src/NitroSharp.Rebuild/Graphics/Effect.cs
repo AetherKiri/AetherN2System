@@ -9,7 +9,8 @@ internal enum EffectKind : byte
 {
     Blit,
     Grayscale,
-    BoxBlur
+    BoxBlur,
+    Sepia
 }
 
 internal readonly record struct EffectDescription(EffectKind Kind, byte NumberOfPasses = 1);

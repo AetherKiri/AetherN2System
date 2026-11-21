@@ -199,8 +199,19 @@ internal sealed class MixedScriptDecoder(byte[] bytes, Encoding structure, Sourc
     {
         int start = _position;
         _position += 2;
-        while (_position < bytes.Length && !Matches("*/")) _position += CharacterLength(_position, structure);
-        if (_position < bytes.Length) _position += 2;
+        int depth = 1;
+        bool quoted = false;
+        while (_position < bytes.Length && depth > 0)
+        {
+            if (!quoted && Matches("/*")) { depth++; _position += 2; }
+            else if (!quoted && Matches("*/")) { depth--; _position += 2; }
+            else
+            {
+                if (bytes[_position] == '"') quoted = !quoted;
+                if (bytes[_position] is 10 or 13) quoted = false;
+                _position += CharacterLength(_position, structure);
+            }
+        }
         Append(start, _position, structure);
     }
 

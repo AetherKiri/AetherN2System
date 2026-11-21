@@ -152,7 +152,7 @@ internal sealed partial class FrameSequence : RenderItem
     {
         if (_disposed || IsPendingDestruction) return;
         base.Update(ctx);
-        AdvanceFrame(ctx.DeltaTime);
+        AdvanceFrame(ctx.StorySkipping && !_loop ? _interval * _frames.Length : ctx.DeltaTime);
     }
 
     internal void AdvanceFrame(double milliseconds)
