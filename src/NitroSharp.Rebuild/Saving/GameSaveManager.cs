@@ -19,6 +19,8 @@ namespace NitroSharp.Saving;
 
 internal sealed class GameSaveManager
 {
+    private const string TextSpeedFlag = "SYSTEM_text_speed";
+    private const string TextSpeedInitializedFlag = "AETHER_hanachirasu_text_speed_initialized";
     private readonly GameContext _ctx;
     private readonly SaveSlotStorage _storage;
     private readonly Queue<uint> _pendingSaves = new();
@@ -56,9 +58,7 @@ internal sealed class GameSaveManager
         { context.RootLog.Warn($"Cannot load dialogue history: {error.Message}"); }
         UpdateSavePath();
         if (_storage.Exists(0)) RequestLoad(0);
-        if (context.Profile.DefaultTextSpeed is { } speed
-            && context.VM.GetHostFlag("SYSTEM_text_speed").AsNumber() is null)
-            context.VM.SetHostFlag("SYSTEM_text_speed", ConstantValue.Number(speed));
+        InitializeTextSpeed();
     }
 
     public string? LastError { get; private set; }
@@ -73,6 +73,20 @@ internal sealed class GameSaveManager
     public DateTime? GetSlotDate(uint slot) => _storage.GetDate(slot);
     public void DeleteSave(uint slot) => _storage.Delete(slot);
     private void UpdateSavePath() => _ctx.VM.SetHostFlag("SYSTEM_save_path", ConstantValue.String(_storage.DirectoryPath));
+
+    private void InitializeTextSpeed()
+    {
+        if (_ctx.Profile.DefaultTextSpeed is not { } defaultSpeed) return;
+
+        var vm = _ctx.VM;
+        float? speed = vm.GetHostFlag(TextSpeedFlag).AsNumber();
+        bool hanachirasu = _ctx.Profile.NpaScheme == "hanachirasu";
+        // Older builds could persist the VM's implicit zero for an unset speed.
+        // Record the migration in common flags so the player can still choose instant text.
+        if (speed is null || (hanachirasu && speed == 0 && vm.GetHostFlag(TextSpeedInitializedFlag).AsBool() != true))
+            vm.SetHostFlag(TextSpeedFlag, ConstantValue.Number(defaultSpeed));
+        if (hanachirasu) vm.SetHostFlag(TextSpeedInitializedFlag, ConstantValue.True);
+    }
 
     public void RequestSave(uint slot)
     {
@@ -96,6 +110,7 @@ internal sealed class GameSaveManager
             {
                 _ctx.VM.RestoreFlags(ReadGlobals(payload));
                 UpdateSavePath();
+                InitializeTextSpeed();
             }
             else
             {
