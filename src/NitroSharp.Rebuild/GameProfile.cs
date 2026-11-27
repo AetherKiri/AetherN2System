@@ -35,6 +35,8 @@ public sealed class GameProfile
     public string? DialogueVariables { get; init; }
     public string? NpaScheme { get; init; }
     internal float? DefaultTextSpeed { get; init; }
+    // At the authored 24 pt, the bundled font wraps lines that fit in Hanachirasu.
+    internal float DialogueFontScale => NpaScheme == "hanachirasu" ? 20f / 24f : 1f;
     internal DesignSizeU? SaveThumbnailSize { get; init; }
     internal string? WritableDirectory { get; set; }
     internal string? SaveDataDirectory { get; set; }

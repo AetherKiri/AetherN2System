@@ -373,7 +373,7 @@ internal sealed partial class Builtins : BuiltInFunctions
         if (ResolveEntityPath(path, out EntityName name, out Entity? parent) && parent is RenderItem box)
         {
             var page = _world.AddEntity(new DialoguePage(name, parent, box.Priority,
-                blockToken, maxWidth, maxHeight, lineSpacing));
+                blockToken, maxWidth, maxHeight, lineSpacing, _ctx.Profile.DialogueFontScale));
             page.ScriptScope = CurrentThread.EntityContext;
             page.Transform.Position = box.Transform.Position;
             page.SetAlias(EntityAlias.Parse(blockToken.BlockName));

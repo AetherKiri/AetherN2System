@@ -14,7 +14,7 @@ internal sealed partial class DialoguePage : RenderItem
     private readonly DialogueBlockToken _token;
     private readonly string _readKey;
     private readonly CompiledDialogueBlock _block;
-    private readonly TextLayout _layout;
+    private TextLayout _layout;
     private bool _verticalGlyphs;
     private readonly Queue<DialogueSegment> _segments = new();
     private readonly Vector4 _margin = new(0, 10, 0, 0);
@@ -36,7 +36,7 @@ internal sealed partial class DialoguePage : RenderItem
     internal Entity? ScriptScope { get; set; }
 
     public DialoguePage(EntityName name, Entity parent, int priority,
-        in DialogueBlockToken token, uint maxWidth, uint maxHeight, int lineSpacing)
+        in DialogueBlockToken token, uint maxWidth, uint maxHeight, int lineSpacing, float fontScale)
         : base(name, parent, priority)
     {
         // Loading prepares a page; the script enters it after its window is ready.
@@ -48,7 +48,7 @@ internal sealed partial class DialoguePage : RenderItem
         _verticalGlyphs = parent.Process.FontSettings.VerticalGlyphs;
         _block = token.Module.GetSubroutine(token.SubroutineIndex).DialogueBlocks[token.Offset];
         _layout = new TextLayout(maxWidth, maxHeight,
-            fixedLineHeight: lineSpacing > 0 ? lineSpacing : null);
+            fixedLineHeight: lineSpacing > 0 ? lineSpacing : null, fontScale: fontScale);
     }
 
     public bool IsIdle { get; private set; } = true;

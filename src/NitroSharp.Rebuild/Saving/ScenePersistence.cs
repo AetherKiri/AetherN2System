@@ -706,7 +706,10 @@ namespace NitroSharp.Graphics
         {
             string box = r.ReadString(), block = r.ReadString(); NsxModule module = ctx.VM.ReadSaveModule(r);
             var token = new DialogueBlockToken(box, block, module, r.ReadInt32(), r.ReadInt32());
-            var page = new DialoguePage(name, parent, priority, token, r.ReadUInt32(), r.ReadUInt32(), r.ReadInt32());
+            uint width = r.ReadUInt32(), height = r.ReadUInt32();
+            int lineSpacing = r.ReadInt32();
+            float fontScale = ctx.Profile.DialogueFontScale;
+            var page = new DialoguePage(name, parent, priority, token, width, height, lineSpacing, fontScale);
             page._verticalGlyphs = r.ReadBoolean();
             page._partIndex = r.ReadInt32();
             if (page._partIndex < 0 || page._partIndex > page._block.Parts.Length) throw new InvalidDataException("Invalid dialogue position.");
@@ -716,15 +719,16 @@ namespace NitroSharp.Graphics
             int thread = r.ReadInt32();
             if (thread >= 0) resolve.Add(entities => page._codeThread = (Thread)SaveIO.EntityAt(entities, thread));
             var runs = SaveIO.ReadRuns(r);
-            int appends = SaveIO.ReadCount(r); int runOffset = 0;
-            for (int i = 0; i < appends; i++)
-            {
-                int length = SaveIO.ReadCount(r);
-                if (length > runs.Length - runOffset) throw new InvalidDataException("Invalid saved dialogue runs.");
-                page._layout.Append(ctx.GlyphRasterizer, runs.AsSpan().Slice(runOffset, length)); runOffset += length;
-            }
-            if (runOffset != runs.Length) throw new InvalidDataException("Incomplete saved dialogue runs.");
+            var appendLengths = new int[SaveIO.ReadCount(r)];
+            for (int i = 0; i < appendLengths.Length; i++) appendLengths[i] = SaveIO.ReadCount(r);
             int opacityCount = SaveIO.ReadCount(r);
+            appendRuns(page._layout);
+            if (opacityCount != page._layout.Glyphs.Length && fontScale != 1f)
+            {
+                // Old pages clipped by the dialogue box must retain their saved glyph indices.
+                page._layout = new TextLayout(width, height, fixedLineHeight: lineSpacing > 0 ? lineSpacing : null);
+                appendRuns(page._layout);
+            }
             if (opacityCount != page._layout.Glyphs.Length) throw new InvalidDataException("Saved dialogue glyph layout does not match installed fonts.");
             for (int i = 0; i < opacityCount; i++) page._layout.GetOpacityValuesMut(i..(i + 1))[0] = r.ReadSingle();
             page._textAnimation = r.ReadBoolean() ? DialogueTextAnimation.ReadSave(r, page._layout) : null;
@@ -741,6 +745,18 @@ namespace NitroSharp.Graphics
                 page._segments.Enqueue(segment);
             }
             return page;
+
+            void appendRuns(TextLayout layout)
+            {
+                int runOffset = 0;
+                foreach (int length in appendLengths)
+                {
+                    if (length > runs.Length - runOffset) throw new InvalidDataException("Invalid saved dialogue runs.");
+                    layout.Append(ctx.GlyphRasterizer, runs.AsSpan().Slice(runOffset, length));
+                    runOffset += length;
+                }
+                if (runOffset != runs.Length) throw new InvalidDataException("Incomplete saved dialogue runs.");
+            }
         }
     }
 }
