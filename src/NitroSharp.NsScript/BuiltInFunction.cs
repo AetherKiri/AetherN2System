@@ -144,5 +144,7 @@ public enum BuiltInFunction : byte
     ReadFile = 240,
     WriteFile = 241,
     OpenSaveMenu = 242,
-    EnableDirect3DHAL = 243
+    EnableDirect3DHAL = 243,
+    CreateSurface = 244,
+    SetSurface = 245
 }

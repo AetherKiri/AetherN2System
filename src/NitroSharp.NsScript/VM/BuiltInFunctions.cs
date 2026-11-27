@@ -128,6 +128,8 @@ public abstract class BuiltInFunctions
     public virtual void Grayscale(in EntityQuery query) { NotImplemented(); }
 
     public virtual void CreateEffect(in EntityPath entityPath, int priority, NsCoordinate x, NsCoordinate y, uint width, uint height, string effectName) { NotImplemented(); }
+    public virtual void CreateSurface(in EntityPath entityPath, int priority, uint width, uint height, bool transparent) { NotImplemented(); }
+    public virtual void SetSurface(in EntityQuery effect, string target) { NotImplemented(); }
 
     public virtual void CreateCube(in EntityPath entityPath, int priority, string front, string back, string right, string left, string top, string bottom) { NotImplemented(); }
     public virtual void SetFieldOfView(string unk1, double unk2) { NotImplemented(); }

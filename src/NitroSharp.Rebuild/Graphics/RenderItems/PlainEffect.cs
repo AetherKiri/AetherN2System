@@ -29,6 +29,7 @@ internal sealed partial class PlainEffect : RenderItem
     }
 
     public bool IsPassive { get; private set; }
+    internal Sprite? Surface { get; set; }
     internal SpriteTexture? Snapshot => _snapshot;
 
     public override DesignSize GetSize(RenderContext ctx) => _size.ToFloatSize();
@@ -36,7 +37,7 @@ internal sealed partial class PlainEffect : RenderItem
     internal void RefreshSnapshot()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (IsPassive) return;
+        if (IsPassive || Surface is not null) return;
         if (_sourceRectangle is null)
         {
             Vector3 position = Transform.Position;
@@ -76,7 +77,7 @@ internal sealed partial class PlainEffect : RenderItem
 
     public override void Render(GameContext ctx)
     {
-        if (_snapshot is not { } texture) return;
+        if (Surface is not null || _snapshot is not { } texture) return;
         if (_blurDirty)
         {
             _blurredSnapshot?.Dispose();

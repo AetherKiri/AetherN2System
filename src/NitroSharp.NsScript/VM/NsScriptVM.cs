@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using NitroSharp.Common;
 using MessagePack;
+using NitroSharp.NsScript.Compiler;
 using NitroSharp.NsScript.Primitives;
 using NitroSharp.NsScript.Utilities;
 using ZeroLog;
@@ -521,6 +522,17 @@ public sealed class NsScriptVM
 
     public int InstructionBudget { get; set; } = 100_000;
 
+    private static bool ScriptValuesEqual(ConstantValue left, ConstantValue right)
+    {
+        if (left.AsString() is { } leftText && right.AsBuiltInConstant() is { } rightConstant
+            && WellKnownSymbols.LookupBuiltInConstant(leftText) == rightConstant)
+            return true;
+        if (right.AsString() is { } rightText && left.AsBuiltInConstant() is { } leftConstant
+            && WellKnownSymbols.LookupBuiltInConstant(rightText) == leftConstant)
+            return true;
+        return left.Equals(right);
+    }
+
     private TickResult TickCore(ref NsScriptThreadState thread, BuiltInFunctions builtins)
     {
         if (thread.CallFrameStack.Count == 0)
@@ -598,18 +610,19 @@ public sealed class NsScriptVM
                 case Opcode.Equal:
                     op1 = evalStack.Pop();
                     op2 = evalStack.Pop();
-                    evalStack.Push(op1 == op2);
+                    evalStack.Push(ConstantValue.Boolean(ScriptValuesEqual(op1, op2)));
                     break;
                 case Opcode.NotEqual:
                     op1 = evalStack.Pop();
                     op2 = evalStack.Pop();
-                    evalStack.Push(op1 != op2);
+                    evalStack.Push(ConstantValue.Boolean(!ScriptValuesEqual(op1, op2)));
                     break;
                 case Opcode.Neg:
                     ref ConstantValue val = ref evalStack.Peek();
                     val = val.Type switch
                     {
                         BuiltInType.Numeric => ConstantValue.Number(-val.AsNumber()!.Value),
+                        BuiltInType.DeltaNumeric => ConstantValue.Delta(-val.AsDeltaNumber()!.Value),
                         // TODO: runtime error
                         _ => throw ThrowHelper.Unreachable()
                     };

@@ -56,5 +56,21 @@ chapter main
     WaitKey();
     Delete("plain_crop");
     WaitKey();
+    CreateColor("surface_source", 2, 160, 0, 160, 180, "RED");
+    CreateColor("foreground", 10, 0, 0, 320, 180, "BLUE");
+    CreateSurface("surface_snapshot", 5, 320, 0, false);
+    CreateEffect("surface_capture", 4, 0, 0, 320, 180, "Plain");
+    SetSurface("surface_capture", "surface_snapshot");
+    Request("surface_capture", Passive);
+    Draw();
+    SetSurface("surface_capture", "null");
+    Delete("surface_capture");
+    Delete("surface_source");
+    Delete("foreground");
+    WaitKey();
+    Move("surface_snapshot", 0, @-160, @0);
+    WaitKey();
+    Delete("surface_snapshot");
+    WaitKey();
     Exit();
 }

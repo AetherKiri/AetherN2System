@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using NitroSharp.Graphics;
 using NitroSharp.Text;
 
@@ -44,22 +45,34 @@ internal sealed partial class Process : Entity
 
     public void RenderAll(GameContext ctx)
     {
+        CollectRenderItems(ctx, int.MaxValue);
+        foreach (RenderItem renderItem in _renderList)
+        {
+            renderItem.Render(ctx);
+        }
+    }
+
+    internal SpriteTexture CaptureBelow(GameContext ctx, PlainEffect effect, Sprite surface, DesignRectU rectangle)
+    {
+        CollectRenderItems(ctx, effect.Priority);
+        _renderList.Remove(surface);
+        return ctx.RenderContext.CaptureScene(ctx, CollectionsMarshal.AsSpan(_renderList), rectangle);
+    }
+
+    private void CollectRenderItems(GameContext ctx, int maximumPriority)
+    {
         _renderList.Clear();
 
         bool eraseText = ctx.VM.SystemVariables.IsTextErased;
         foreach (RenderItem renderItem in GetDescendants<RenderItem>())
         {
-            if (renderItem.IsHidden || (eraseText && renderItem.HidesWithText) || !AreMouseStatesVisible(renderItem))
+            if (renderItem.Priority > maximumPriority || renderItem.IsHidden
+                || (eraseText && renderItem.HidesWithText) || !AreMouseStatesVisible(renderItem))
                 continue;
             _renderList.Add(renderItem);
         }
 
         _renderList.Sort();
-
-        foreach (RenderItem renderItem in _renderList)
-        {
-            renderItem.Render(ctx);
-        }
     }
 
     private static bool AreMouseStatesVisible(Entity entity)

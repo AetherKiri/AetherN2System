@@ -144,6 +144,64 @@ internal sealed partial class Builtins : BuiltInFunctions
         _world.AddEntity(effect);
     }
 
+    public override void CreateSurface(in EntityPath path, int priority, uint width, uint height, bool transparent)
+    {
+        if (transparent) throw new NotSupportedException("A transparent drawing surface is not supported.");
+        RenderContext render = _ctx.RenderContext;
+        if (width == 0) width = render.DesignResolution.Width;
+        if (height == 0) height = render.DesignResolution.Height;
+        if (width > render.DesignResolution.Width || height > render.DesignResolution.Height)
+            throw new ArgumentOutOfRangeException(nameof(width), "The drawing surface exceeds the design resolution.");
+        if (ResolveEntityPath(path, out EntityName name, out Entity? parent))
+        {
+            var texture = SpriteTexture.SolidColor(RgbaFloat.Clear, new DesignSizeU(width, height));
+            _world.AddEntity(new Sprite(name, parent, priority, texture));
+        }
+    }
+
+    public override void SetSurface(in EntityQuery effect, string target)
+    {
+        Sprite? surface = null;
+        if (target.Length != 0 && !target.Equals("null", StringComparison.OrdinalIgnoreCase))
+        {
+            var targets = Query(EntityQuery.Parse(target));
+            if (targets.AsSpan() is not [Sprite sprite])
+                throw new InvalidOperationException($"Drawing surface '{target}' was not found or is ambiguous.");
+            surface = sprite;
+        }
+        foreach (Entity entity in Query(effect))
+        {
+            if (entity is PlainEffect plain) plain.Surface = surface;
+        }
+    }
+
+    public override void Draw()
+    {
+        Process process = _world.CurrentProcess;
+        RenderContext render = _ctx.RenderContext;
+        foreach (Entity entity in process.DescendantsAndSelf())
+        {
+            if (entity is not PlainEffect { Surface: { IsPendingDestruction: false } surface } effect) continue;
+            // Draw records the current composition before the script changes its layers.
+            long started = Stopwatch.GetTimestamp();
+            var wait = new System.Threading.SpinWait();
+            while (!_ctx.Content.ResolveAssets())
+            {
+                if (Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(5))
+                    throw new TimeoutException("Textures for the drawing surface did not finish loading.");
+                wait.SpinOnce();
+            }
+            Vector3 origin = effect.Transform.Position;
+            DesignSize size = surface.GetSize(render);
+            if (!float.IsFinite(origin.X) || !float.IsFinite(origin.Y)
+                || origin.X < 0 || origin.Y < 0 || origin.X + size.Width > render.DesignResolution.Width
+                || origin.Y + size.Height > render.DesignResolution.Height)
+                throw new ArgumentOutOfRangeException(nameof(origin), "The effect capture is outside the design resolution.");
+            var rectangle = new DesignRectU((uint)origin.X, (uint)origin.Y, (uint)size.Width, (uint)size.Height);
+            surface.ReplaceTexture(render.GraphicsDevice, process.CaptureBelow(_ctx, effect, surface, rectangle));
+        }
+    }
+
     public override void CreateFrameAnimation(in EntityPath path, int priority, NsCoordinate x, NsCoordinate y,
         ReadOnlySpan<string> frames, int ticksPerFrame, string finalFrame, bool removeOnCompletion, bool loop, bool wait)
     {

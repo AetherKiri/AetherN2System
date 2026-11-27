@@ -396,7 +396,7 @@ namespace NitroSharp.Graphics
             }
         }
 
-        internal SpriteTexture CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items)
+        internal SpriteTexture CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items, DesignRectU? rectangle = null)
         {
             var target = CreateSceneTarget();
             try
@@ -404,7 +404,7 @@ namespace NitroSharp.Graphics
                 CaptureScene(context, items, target);
                 // Retain the entire target until the scene transition releases
                 // its snapshot; its capture is submitted before the main scene.
-                return SceneTexture(target);
+                return SceneTexture(target, rectangle);
             }
             catch
             {
@@ -416,12 +416,12 @@ namespace NitroSharp.Graphics
         internal RenderTarget CreateSceneTarget()
             => new(GraphicsDevice, RenderResolution, _swapchainTarget.ColorTarget.Format);
 
-        internal SpriteTexture SceneTexture(RenderTarget target)
+        internal SpriteTexture SceneTexture(RenderTarget target, DesignRectU? rectangle = null)
         {
             var origin = new Vector2(ViewportLeft / RenderResolution.Width, ViewportTop / RenderResolution.Height);
             var extent = new Vector2((ViewportRight - ViewportLeft) / RenderResolution.Width,
                 (ViewportBottom - ViewportTop) / RenderResolution.Height);
-            return SpriteTexture.FromOwnedTarget(target, DesignResolution, origin, extent);
+            return SpriteTexture.FromOwnedTarget(target, DesignResolution, origin, extent, rectangle);
         }
 
         internal void CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items, RenderTarget target)

@@ -59,6 +59,12 @@ internal sealed class BuiltInFunctionDispatcher
                 // The runtime does not expose the original Direct3D HAL.
                 SetResult(ConstantValue.False);
                 break;
+            case BuiltInFunction.CreateSurface:
+                _impl.CreateSurface(args.TakeEntityPath(), args.TakeInt(), args.TakeUInt(), args.TakeUInt(), args.TakeBool());
+                break;
+            case BuiltInFunction.SetSurface:
+                _impl.SetSurface(args.TakeEntityQuery(), args.TakeString());
+                break;
             case BuiltInFunction.DrawLegacyTransition:
                 EntityQuery legacyQuery = args.TakeEntityQuery();
                 TimeSpan legacyDuration = args.TakeTimeSpan();
