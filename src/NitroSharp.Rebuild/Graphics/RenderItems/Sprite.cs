@@ -10,7 +10,7 @@ namespace NitroSharp.Graphics;
 
 internal partial class Sprite : RenderItem
 {
-    private readonly SpriteTexture _texture;
+    private SpriteTexture _texture;
     private bool _disposed;
     private uint _blurPasses;
     internal NsTone Tone { get; private set; }
@@ -25,6 +25,14 @@ internal partial class Sprite : RenderItem
     }
 
     public SpriteTexture Texture => _texture;
+
+    internal void ReplaceTexture(GraphicsDevice graphicsDevice, SpriteTexture texture)
+    {
+        SpriteTexture previous = _texture;
+        _texture = texture;
+        _effectsDirty = true;
+        GraphicsUtils.DisposeAfterIdle(graphicsDevice, previous);
+    }
 
     public void SetBlur(uint passes)
     {
@@ -73,6 +81,7 @@ internal partial class Sprite : RenderItem
 
     private void RenderCore(RenderContext ctx, DrawBatch drawBatch)
     {
+        if (_texture.Kind == SpriteTextureKind.SolidColor && _texture.Color.A == 0) return;
         Texture alphaMaskTex = ctx.WhiteTexture;
         Vector2 alphaMaskPos = Vector2.Zero;
         // if (TryGetAlphaMaskAscendant() is { } alphaMask)
@@ -180,8 +189,8 @@ internal readonly partial struct SpriteTexture : IDisposable
         => FromTexture(SpriteTextureKind.Owned, texture, size, sourceRectangle, uvOrigin, uvExtent);
 
     internal static SpriteTexture FromOwnedTarget(RenderTarget target, DesignSizeU size,
-        Vector2 uvOrigin, Vector2 uvExtent)
-        => new(SpriteTextureKind.Owned, null, null, null, new TextureLease(target.ColorTarget, target),
+        Vector2 uvOrigin, Vector2 uvExtent, DesignRectU? sourceRectangle = null)
+        => new(SpriteTextureKind.Owned, null, sourceRectangle, null, new TextureLease(target.ColorTarget, target),
             RgbaFloat.White, size, uvOrigin, uvExtent);
 
     public static SpriteTexture FromBorrowedTexture(Texture texture)

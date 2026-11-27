@@ -223,8 +223,22 @@ internal static unsafe class Exports
 
     private static void ApplyKnownInstallDefaults(JsonObjectBuilder builder, string root)
     {
-        // Detect the two supported install layouts using their launchers,
-        // never a user-chosen parent folder name. Explicit profile values win.
+        // Use launcher names so renamed game directories get the same defaults.
+        // Explicit profile values win.
+        if (FindFile(root, "hanachirasu.exe") is not null)
+        {
+            builder.Default("product.name", "Hanachirasu");
+            builder.Default("designResolution", "800x600");
+            builder.Default("dev.npaScheme", "hanachirasu");
+            builder.Default("save.thumbnailSize", "100x75");
+            builder.DefaultNode("text.defaultSpeed", System.Text.Json.Nodes.JsonValue.Create(500)!);
+            builder.Default("icons.waitLine", "cg/sys/icon/line/cur00_00_%02d.png#34");
+            builder.Default("icons.waitPage", "cg/sys/icon/page/cur01_00_%02d.png#13");
+            builder.Default("icons.waitAuto", "cg/sys/icon/line/cur00_00_%02d.png#34");
+            builder.Default("icons.backlogVoice", "cg/sys/backlog/speaker-%03d.png#3");
+            return;
+        }
+
         bool main = FindFile(root, "Muramasa_chs.exe") is not null || FindFile(root, "Muramasa.exe") is not null;
         bool extra = FindFile(root, "MuramasaAD_cn.exe") is not null || FindFile(root, "MuramasaAD.exe") is not null;
         if (!main && !extra) return;

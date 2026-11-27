@@ -93,6 +93,13 @@ with tempfile.TemporaryDirectory(prefix='aether-screen-') as cache:
             assert all(abs(actual - target) <= 1 for actual, target in zip(faded[3], (0, 64, 128, 255))), ('Passive move and fade', faded)
             advance()
             assert pixels() == ((0, 128, 0, 255),) * 4, ('Passive crop deletion', pixels())
+            advance()
+            green, red = (0, 128, 0, 255), (255, 0, 0, 255)
+            assert pixels() == (green, red, green, red), ('Draw captures only the lower layers', pixels())
+            advance()
+            assert pixels() == (red, green, red, green), ('Surface survives detaching and moving', pixels())
+            advance()
+            assert pixels() == (green,) * 4, ('Surface deletion', pixels())
             print(f'{width}x{height}: SCREEN/VIDEO snapshots, image lifetime, Passive freeze/crop/move/fade/lock and scaling passed')
         finally:
             lib.aether_n2system_destroy(handle)

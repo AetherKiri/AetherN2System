@@ -128,15 +128,21 @@ internal sealed class GameContext : IDisposable
         RenderContext.BeginFrame(FrameStamp);
         World.BeginFrame();
         World.Update(this);
+        RenderTarget? storyFrame = null;
         if (Content.ResolveAssets())
         {
             RenderContext.ResolveGlyphs();
+            storyFrame = Saves.RecordStoryThumbnail();
             RenderContext.MainBatch.Clear(RgbaFloat.Black);
             World.Render(this);
         }
         RenderContext.EndFrame();
         RenderContext.Present();
-        Saves.CompletePendingSaves();
+        try { Saves.CompletePendingSaves(storyFrame); }
+        finally
+        {
+            if (storyFrame is not null) GraphicsUtils.DisposeAfterIdle(RenderContext.GraphicsDevice, storyFrame);
+        }
     }
 
     public static async Task<GameContext> Create(

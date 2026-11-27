@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Numerics;
+using System.Text;
 using NitroSharp.Input;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.VM;
@@ -13,7 +14,7 @@ internal sealed partial class DialoguePage : RenderItem
     private readonly DialogueBlockToken _token;
     private readonly string _readKey;
     private readonly CompiledDialogueBlock _block;
-    private readonly TextLayout _layout;
+    private TextLayout _layout;
     private bool _verticalGlyphs;
     private readonly Queue<DialogueSegment> _segments = new();
     private readonly Vector4 _margin = new(0, 10, 0, 0);
@@ -24,6 +25,10 @@ internal sealed partial class DialoguePage : RenderItem
     private bool _disableTextAnimation;
     private bool _entered;
     private bool _destroyWhenIdle;
+    private bool _noBacklog;
+    private bool _noWaitIcon;
+    private bool _lineWait;
+    private VoiceSegment? _backlogVoice;
     private DialogueTextAnimation? _textAnimation;
     private int _charactersSinceInput;
     private float _waitElapsed;
@@ -31,7 +36,7 @@ internal sealed partial class DialoguePage : RenderItem
     internal Entity? ScriptScope { get; set; }
 
     public DialoguePage(EntityName name, Entity parent, int priority,
-        in DialogueBlockToken token, uint maxWidth, uint maxHeight, int lineSpacing)
+        in DialogueBlockToken token, uint maxWidth, uint maxHeight, int lineSpacing, float fontScale)
         : base(name, parent, priority)
     {
         // Loading prepares a page; the script enters it after its window is ready.
@@ -43,7 +48,7 @@ internal sealed partial class DialoguePage : RenderItem
         _verticalGlyphs = parent.Process.FontSettings.VerticalGlyphs;
         _block = token.Module.GetSubroutine(token.SubroutineIndex).DialogueBlocks[token.Offset];
         _layout = new TextLayout(maxWidth, maxHeight,
-            fixedLineHeight: lineSpacing > 0 ? lineSpacing : null);
+            fixedLineHeight: lineSpacing > 0 ? lineSpacing : null, fontScale: fontScale);
     }
 
     public bool IsIdle { get; private set; } = true;
@@ -67,6 +72,16 @@ internal sealed partial class DialoguePage : RenderItem
         {
             _disableTextAnimation = true;
             _textAnimation?.Complete();
+            return true;
+        }
+        if (action == NsEntityAction.NoBacklog)
+        {
+            _noBacklog = true;
+            return true;
+        }
+        if (action == NsEntityAction.NoWaitIcon)
+        {
+            _noWaitIcon = true;
             return true;
         }
         return base.Request(action);
@@ -133,20 +148,37 @@ internal sealed partial class DialoguePage : RenderItem
                     int start = _layout.Glyphs.Length;
                     _layout.Append(ctx.RenderContext.Text.GlyphRasterizer, text.TextRuns.AsSpan());
                     float duration = settings.Speed?.AsNumber() ?? 200;
+                    float interval = settings.Interval?.AsNumber() ?? 48;
+                    if (ctx.Profile.DefaultTextSpeed.HasValue)
+                    {
+                        // Early NSS exposes a 0–1000 speed slider. Zero reveals instantly.
+                        interval = settings.Interval?.AsNumber() is > 0 and var explicitInterval
+                            ? explicitInterval : duration * 0.05f;
+                        duration = Math.Min(duration, 120);
+                    }
                     bool animate = !_disableTextAnimation && !skip && duration > 0;
                     _textAnimation = new DialogueTextAnimation(_layout, start,
-                        animate ? settings.Interval?.AsNumber() ?? 48 : 0, animate ? duration : 0);
+                        animate ? interval : 0, animate ? duration : 0);
+                    if (!_noBacklog && !ctx.World.IsSystemMenu)
+                    {
+                        var content = new StringBuilder();
+                        foreach (TextRun run in text.TextRuns) content.Append(run.Text.Span);
+                        ctx.Builtins.AddBacklogText(content.ToString(), _backlogVoice);
+                    }
+                    _backlogVoice = null;
                     _charactersSinceInput += _textAnimation.CharacterCount;
                     _unreadText = true;
                     if (IsRevealing) goto done;
                 }
                 else if (segment is VoiceSegment voice)
                 {
+                    _backlogVoice = voice.Action == NsVoiceAction.Play ? voice : null;
                     ctx.Builtins.ApplyDialogueVoice(Process, voice, skip);
                 }
                 else if (segment is MarkerSegment { MarkerKind: MarkerKind.Halt })
                 {
                     _waitingForInput = true;
+                    _lineWait = true;
                     _unreadText = false;
                     goto done;
                 }
@@ -156,6 +188,7 @@ internal sealed partial class DialoguePage : RenderItem
                 if (_unreadText)
                 {
                     _waitingForInput = true;
+                    _lineWait = false;
                     _unreadText = false;
                     goto done;
                 }
@@ -185,6 +218,7 @@ internal sealed partial class DialoguePage : RenderItem
                     if (_unreadText)
                     {
                         _waitingForInput = true;
+                        _lineWait = false;
                         _unreadText = false;
                         goto done;
                     }
@@ -213,10 +247,22 @@ internal sealed partial class DialoguePage : RenderItem
     {
         if (!_entered || IsPendingDestruction || ctx.VM.SystemVariables.IsTextErased) return;
         RenderContext render = ctx.RenderContext;
+        Matrix4x4 transform = render.GetTransformMatrix(Transform, GetSize(render), useScaling: true, aligned: false);
         render.Text.Render(render, render.MainBatch, _layout,
-            render.GetTransformMatrix(Transform, GetSize(render), useScaling: true, aligned: false),
+            transform,
             new Vector2(_margin.X, _margin.Y),
             new ScreenRectU(PointU<ScreenPixel>.Zero, render.RenderResolution), Color.A,
             verticalGlyphs: _verticalGlyphs);
+        if (!_waitingForInput || IsRevealing || _noWaitIcon || _layout.Glyphs.IsEmpty
+            || ctx.StorySkipping || ctx.VM.GetHostVariable("SYSTEM_text_icon_disable").AsBool() == true)
+            return;
+
+        var icons = render.Icons;
+        Icon? icon = (ctx.VM.SystemVariables.TextAuto.AsBool() == true ? icons.WaitAuto : null)
+            ?? (_lineWait ? icons.WaitLine : icons.WaitPage) ?? icons.WaitLine;
+        if (icon is null) return;
+        Vector2 end = _layout.EndOfLastLine;
+        end += new Vector2(_margin.X + 6, _margin.Y - icon.Size.Height * 0.55f);
+        icon.Render(render, Matrix4x4.CreateTranslation(new Vector3(end, 0)) * transform, _waitElapsed, Color.A);
     }
 }

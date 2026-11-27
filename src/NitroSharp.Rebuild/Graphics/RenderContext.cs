@@ -283,12 +283,11 @@ namespace NitroSharp.Graphics
 
         private AnimatedIcons LoadIcons(GameProfile gameProfile)
         {
-            Icon? waitLine = null;
-            if (Icon.Exists(Content, gameProfile.IconPathPatterns.WaitLine))
-            {
-                waitLine = Icon.Load(this, gameProfile.IconPathPatterns.WaitLine);
-            }
-            return new AnimatedIcons(waitLine);
+            var patterns = gameProfile.IconPathPatterns;
+            return new AnimatedIcons(Load(patterns.WaitLine), Load(patterns.WaitPage),
+                Load(patterns.WaitAuto), Load(patterns.BacklogVoice));
+
+            Icon? Load(IconPathPattern pattern) => Icon.Exists(Content, pattern) ? Icon.Load(this, pattern) : null;
         }
 
         public void BeginFrame(in FrameStamp frameStamp)
@@ -396,7 +395,7 @@ namespace NitroSharp.Graphics
             }
         }
 
-        internal SpriteTexture CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items)
+        internal SpriteTexture CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items, DesignRectU? rectangle = null)
         {
             var target = CreateSceneTarget();
             try
@@ -404,7 +403,7 @@ namespace NitroSharp.Graphics
                 CaptureScene(context, items, target);
                 // Retain the entire target until the scene transition releases
                 // its snapshot; its capture is submitted before the main scene.
-                return SceneTexture(target);
+                return SceneTexture(target, rectangle);
             }
             catch
             {
@@ -416,12 +415,12 @@ namespace NitroSharp.Graphics
         internal RenderTarget CreateSceneTarget()
             => new(GraphicsDevice, RenderResolution, _swapchainTarget.ColorTarget.Format);
 
-        internal SpriteTexture SceneTexture(RenderTarget target)
+        internal SpriteTexture SceneTexture(RenderTarget target, DesignRectU? rectangle = null)
         {
             var origin = new Vector2(ViewportLeft / RenderResolution.Width, ViewportTop / RenderResolution.Height);
             var extent = new Vector2((ViewportRight - ViewportLeft) / RenderResolution.Width,
                 (ViewportBottom - ViewportTop) / RenderResolution.Height);
-            return SpriteTexture.FromOwnedTarget(target, DesignResolution, origin, extent);
+            return SpriteTexture.FromOwnedTarget(target, DesignResolution, origin, extent, rectangle);
         }
 
         internal void CaptureScene(GameContext context, ReadOnlySpan<RenderItem> items, RenderTarget target)
@@ -457,11 +456,11 @@ namespace NitroSharp.Graphics
             }
         }
 
-        public unsafe void CopyRgba(Span<byte> destination)
+        public unsafe void CopyRgba(Span<byte> destination, RenderTarget? targetOverride = null)
         {
             using CommandList commands = ResourceFactory.CreateCommandList();
             commands.Begin();
-            Texture staging = _swapchainTarget.ReadBack(commands, ResourceFactory);
+            Texture staging = (targetOverride ?? _swapchainTarget).ReadBack(commands, ResourceFactory);
             commands.End();
             GraphicsDevice.SubmitCommands(commands);
             GraphicsDevice.WaitForIdle();

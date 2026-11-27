@@ -79,6 +79,7 @@ namespace NitroSharp.NsScript.Syntax.Markup
                     node = ParsePreformattedText();
                     break;
                 case "voice":
+                case "VOICE":
                     node = ParseVoiceElement(startTag);
                     break;
                 case "k":

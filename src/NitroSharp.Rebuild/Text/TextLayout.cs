@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Text;
+using FreeTypeBindings;
 using Veldrid;
 
 // Inspired by https://github.com/alexheretic/glyph-brush
@@ -14,6 +15,7 @@ namespace NitroSharp.Text
     {
         private readonly float? _fixedLineHeight;
         private readonly float _rubyFontSizeMultiplier;
+        private readonly float _fontScale;
         private Vector2 _caret = Vector2.Zero;
         private Rectangle<TUnit> _boundingBox;
         private Line _lastLine;
@@ -29,13 +31,15 @@ namespace NitroSharp.Text
             uint? maxWidth = null,
             uint? maxHeight = null,
             float? fixedLineHeight = null,
-            float rubyFontSizeMultiplier = 0.4f)
+            float rubyFontSizeMultiplier = 0.4f,
+            float fontScale = 1f)
         {
             uint mWidth = maxWidth ?? uint.MaxValue;
             uint mHeight = maxHeight ?? uint.MaxValue;
             MaxBounds = new Size<TUnit>(mWidth, mHeight);
             _fixedLineHeight = fixedLineHeight;
             _rubyFontSizeMultiplier = rubyFontSizeMultiplier;
+            _fontScale = fontScale;
             Clear();
         }
 
@@ -56,6 +60,16 @@ namespace NitroSharp.Text
         public ReadOnlySpan<float> OpacityValues => CollectionsMarshal.AsSpan(_opacityValues);
         public ReadOnlySpan<Line> Lines => CollectionsMarshal.AsSpan(_lines);
         public Rectangle<TUnit> BoundingBox => _boundingBox;
+        internal Vector2 EndOfLastLine
+        {
+            get
+            {
+                for (int i = _lines.Count - 1; i >= 0; i--)
+                    if (!_lines[i].IsEmpty)
+                        return new Vector2(_lines[i].Right, _glyphs[_lines[i].GlyphSpan.End.Value - 1].Position.Y);
+                return Vector2.Zero;
+            }
+        }
 
         public Size<TUnit> MaxBounds { get; }
 
@@ -93,6 +107,17 @@ namespace NitroSharp.Text
         {
             SavedAppendLengths.Add(textRuns.Length);
             foreach (TextRun run in textRuns) SavedRuns.Add(run);
+            if (_fontScale != 1f)
+            {
+                // Keep authored sizes in checkpoints and use the adjusted sizes for layout.
+                TextRun[] scaled = textRuns.ToArray();
+                for (int i = 0; i < scaled.Length; i++)
+                {
+                    float points = scaled[i].FontSize.ToFloat() * _fontScale;
+                    scaled[i] = scaled[i].WithFontSize(new PtFontSize(Fixed26Dot6.FromSingle(points)));
+                }
+                textRuns = scaled;
+            }
             int appendStart = _glyphs.Count;
             bool updateLastLine = appendStart > 0;
             var glyphBuf = new List<TextRunGlyph>();

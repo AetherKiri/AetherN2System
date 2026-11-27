@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text;
 using NitroSharp.Common;
 using MessagePack;
+using NitroSharp.NsScript.Compiler;
 using NitroSharp.NsScript.Primitives;
 using NitroSharp.NsScript.Utilities;
 using ZeroLog;
@@ -521,6 +522,17 @@ public sealed class NsScriptVM
 
     public int InstructionBudget { get; set; } = 100_000;
 
+    private static bool ScriptValuesEqual(ConstantValue left, ConstantValue right)
+    {
+        if (left.AsString() is { } leftText && right.AsBuiltInConstant() is { } rightConstant
+            && WellKnownSymbols.LookupBuiltInConstant(leftText) == rightConstant)
+            return true;
+        if (right.AsString() is { } rightText && left.AsBuiltInConstant() is { } leftConstant
+            && WellKnownSymbols.LookupBuiltInConstant(rightText) == leftConstant)
+            return true;
+        return left.Equals(right);
+    }
+
     private TickResult TickCore(ref NsScriptThreadState thread, BuiltInFunctions builtins)
     {
         if (thread.CallFrameStack.Count == 0)
@@ -598,18 +610,19 @@ public sealed class NsScriptVM
                 case Opcode.Equal:
                     op1 = evalStack.Pop();
                     op2 = evalStack.Pop();
-                    evalStack.Push(op1 == op2);
+                    evalStack.Push(ConstantValue.Boolean(ScriptValuesEqual(op1, op2)));
                     break;
                 case Opcode.NotEqual:
                     op1 = evalStack.Pop();
                     op2 = evalStack.Pop();
-                    evalStack.Push(op1 != op2);
+                    evalStack.Push(ConstantValue.Boolean(!ScriptValuesEqual(op1, op2)));
                     break;
                 case Opcode.Neg:
                     ref ConstantValue val = ref evalStack.Peek();
                     val = val.Type switch
                     {
                         BuiltInType.Numeric => ConstantValue.Number(-val.AsNumber()!.Value),
+                        BuiltInType.DeltaNumeric => ConstantValue.Delta(-val.AsDeltaNumber()!.Value),
                         // TODO: runtime error
                         _ => throw ThrowHelper.Unreachable()
                     };
@@ -645,19 +658,18 @@ public sealed class NsScriptVM
                     evalStack.Pop();
                     break;
                 case Opcode.Call:
-                    ushort subroutineToken = program.DecodeToken();
+                case Opcode.CallFar:
+                    CodeOffset callOffset = program.Position - 1;
+                    CallFrame newFrame = opcode == Opcode.Call
+                        ? CreateEntryPointCallFrame(frame.Module, program.DecodeToken())
+                        : externalCall(ref program);
+                    ClearOmittedArguments(thisModule, callOffset, newFrame);
                     frame.ProgramCounter = program.Position;
-                    CallFrame newFrame = CreateEntryPointCallFrame(frame.Module, subroutineToken);
                     thread.CallFrameStack.Push(newFrame);
-                    if (_log.IsDebugEnabled)
+                    if (opcode == Opcode.Call && _log.IsDebugEnabled)
                     {
                         logCall(newFrame);
                     }
-                    return TickResult.Ok;
-                case Opcode.CallFar:
-                    newFrame = externalCall(ref program);
-                    frame.ProgramCounter = program.Position;
-                    thread.CallFrameStack.Push(newFrame);
                     return TickResult.Ok;
                 case Opcode.CallChapter:
                 case Opcode.CallScene:
@@ -1042,6 +1054,17 @@ public sealed class NsScriptVM
             BinaryOperatorKind.Remainder => left % right,
             _ => throw ThrowHelper.UnexpectedValueOf<BinaryOperatorKind>()
         };
+    }
+
+    private void ClearOmittedArguments(NsxModule caller, CodeOffset offset, in CallFrame callee)
+    {
+        if (caller.PartialCalls?.TryGetValue(offset, out byte argumentCount) != true) return;
+        string[] parameters = callee.RuntimeInfo.ParameterNames;
+        for (int i = argumentCount; i < parameters.Length; i++)
+        {
+            if (GlobalsLookup.Variables.TryGetValue(parameters[i], out int slot))
+                GetVariable(slot) = ConstantValue.Null;
+        }
     }
 
     private static CallFrame CreateEntryPointCallFrame(NsxModule module, ushort subroutineIndex)

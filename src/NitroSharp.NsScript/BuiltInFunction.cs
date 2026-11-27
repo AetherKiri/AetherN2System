@@ -143,5 +143,9 @@ public enum BuiltInFunction : byte
     // Keep host extensions outside the original sequential function IDs.
     ReadFile = 240,
     WriteFile = 241,
-    OpenSaveMenu = 242
+    OpenSaveMenu = 242,
+    EnableDirect3DHAL = 243,
+    CreateSurface = 244,
+    SetSurface = 245,
+    SetEnableBacklog = 246
 }

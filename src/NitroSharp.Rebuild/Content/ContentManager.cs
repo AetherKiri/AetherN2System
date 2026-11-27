@@ -112,6 +112,8 @@ internal sealed class ContentManager : IDisposable
         return _textureLoader.LoadTexture(stream, staging);
     }
 
+    internal Texture LoadTexture(Stream stream) => _textureLoader.LoadTexture(stream, staging: false);
+
     public T? TryGet<T>(AssetRef<T> assetRef) where T : class, IDisposable
         => _cache.Get(assetRef.Handle).Asset as T;
 

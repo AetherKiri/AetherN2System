@@ -114,6 +114,13 @@ internal sealed class World : EntityScope
 
     public Entity? Get(in EntityPath entityPath)
     {
+        if (entityPath.Parts is [ { IsAlias: true } alias ])
+        {
+            var matches = new SmallList<Entity>();
+            CurrentProcess.Aliases.Query(new EntityPattern(alias.Value, ContainsWildcard: false), ref matches);
+            return matches is [var entity] ? entity : null;
+        }
+
         if (!TryResolvePath(entityPath, out EntityName name, out Entity? parent))
         {
             return null;
@@ -223,6 +230,15 @@ internal sealed class World : EntityScope
         }
         if (ctx.Saves.ApplyPendingLoad()) return;
         CurrentProcess.MainThread.InterruptVideoWait(ctx.InputContext);
+        if (_systemMenu is null && ctx.Builtins.HasBacklog
+            && !(ctx.VM.SystemVariables.MenuLock.AsBool() ?? false)
+            && !(ctx.VM.SystemVariables.BacklogLock.AsBool() ?? false)
+            && (ctx.InputContext.BacklogKeyPressed || ctx.InputContext.WheelDelta > 0)
+            && TryBeginSystemMenu(ctx.VM, ctx.Profile.SysScripts.Backlog))
+        {
+            ctx.Builtins.SuppressBacklogOpeningInput(ctx.FrameStamp.FrameId);
+            ctx.VM.SystemVariables.BacklogKeyDown = ConstantValue.False;
+        }
         if (_systemMenu is null && !(ctx.VM.SystemVariables.MenuLock.AsBool() ?? false)
             && ctx.InputContext.Consume(InputAction.Back))
         {

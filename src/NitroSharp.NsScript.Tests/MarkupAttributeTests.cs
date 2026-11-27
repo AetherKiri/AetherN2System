@@ -9,6 +9,22 @@ namespace NitroSharp.NsScript.Tests;
 public sealed class MarkupAttributeTests
 {
     [Theory]
+    [InlineData("VOICE", "on", NsVoiceAction.Play)]
+    [InlineData("VOICE", "off", NsVoiceAction.Stop)]
+    [InlineData("voice", "on", NsVoiceAction.Play)]
+    public void VoiceTagKeepsTheAuthoredAudioAndFollowingText(string tag, string mode, NsVoiceAction action)
+    {
+        var nodes = MarkupContent.Parse($"<{tag} name=\"Speaker\" class=\"Speaker\" src=\"voice/line\" mode=\"{mode}\">\nLine").Children;
+        Assert.Collection(nodes, node =>
+        {
+            var voice = Assert.IsType<VoiceElement>(node);
+            Assert.Equal("Speaker", voice.CharacterName);
+            Assert.Equal("voice/line", voice.FileName);
+            Assert.Equal(action, voice.Action);
+        }, node => Assert.Equal("Line", Assert.IsType<MarkupText>(node).Text));
+    }
+
+    [Theory]
     [InlineData("<RUBY TEXT=\"Ｆａｌｌｉｎｇ　Ｄｏｗｎ\">base</RUBY>", "Ｆａｌｌｉｎｇ　Ｄｏｗｎ")]
     [InlineData("<RUBY TEXT=\"two words\">base</RUBY>", "two words")]
     [InlineData("<RUBY\tTEXT = 'two words'>base</RUBY>", "two words")]

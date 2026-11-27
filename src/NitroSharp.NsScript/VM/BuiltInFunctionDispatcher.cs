@@ -55,6 +55,16 @@ internal sealed class BuiltInFunctionDispatcher
             case BuiltInFunction.OpenSaveMenu:
                 _impl.OpenSaveMenu(args.TakeBool());
                 break;
+            case BuiltInFunction.EnableDirect3DHAL:
+                // The runtime does not expose the original Direct3D HAL.
+                SetResult(ConstantValue.False);
+                break;
+            case BuiltInFunction.CreateSurface:
+                _impl.CreateSurface(args.TakeEntityPath(), args.TakeInt(), args.TakeUInt(), args.TakeUInt(), args.TakeBool());
+                break;
+            case BuiltInFunction.SetSurface:
+                _impl.SetSurface(args.TakeEntityQuery(), args.TakeString());
+                break;
             case BuiltInFunction.DrawLegacyTransition:
                 EntityQuery legacyQuery = args.TakeEntityQuery();
                 TimeSpan legacyDuration = args.TakeTimeSpan();
@@ -123,7 +133,10 @@ internal sealed class BuiltInFunctionDispatcher
                 ClearBacklog();
                 break;
             case BuiltInFunction.EnableBacklog:
-                EnableBacklog();
+                SetResult(ConstantValue.Boolean(_impl.IsBacklogEnabled));
+                break;
+            case BuiltInFunction.SetEnableBacklog:
+                _impl.SetBacklogEnabled(args.TakeBool());
                 break;
 
             case BuiltInFunction.CreateName:
@@ -549,11 +562,6 @@ internal sealed class BuiltInFunctionDispatcher
     private void XBOX360_IsAchieved(ref ArgConsumer args)
     {
         args.TakeInt();
-        _result = ConstantValue.True;
-    }
-
-    private void EnableBacklog()
-    {
         _result = ConstantValue.True;
     }
 

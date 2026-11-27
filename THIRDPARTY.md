@@ -81,4 +81,4 @@ Refer to the ``third_party/OpenAL-CS`` directory for more information.
 ## FFmpeg.AutoGen
 Refer to the ``third_party/FFmpeg.AutoGen`` directory for more information.
 
-NPA archive cipher tables and format details are based on nipa by Minagi and Wilhansen (https://github.com/Wilhansen/nipa). The upstream source grants permission to use the code in any way with attribution by source or name. Only the documented Muramasa and MuramasaAD substitution tables are included here; no game assets are distributed.
+The Muramasa and MuramasaAD substitution tables and NPA format details are based on nipa by Minagi and Wilhansen (https://github.com/Wilhansen/nipa). The upstream source grants permission to use the code in any way with attribution by source or name. The Hanachirasu substitution table comes from analysis of the Windows executable.

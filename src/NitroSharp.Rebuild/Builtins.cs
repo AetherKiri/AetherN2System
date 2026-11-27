@@ -144,6 +144,64 @@ internal sealed partial class Builtins : BuiltInFunctions
         _world.AddEntity(effect);
     }
 
+    public override void CreateSurface(in EntityPath path, int priority, uint width, uint height, bool transparent)
+    {
+        if (transparent) throw new NotSupportedException("A transparent drawing surface is not supported.");
+        RenderContext render = _ctx.RenderContext;
+        if (width == 0) width = render.DesignResolution.Width;
+        if (height == 0) height = render.DesignResolution.Height;
+        if (width > render.DesignResolution.Width || height > render.DesignResolution.Height)
+            throw new ArgumentOutOfRangeException(nameof(width), "The drawing surface exceeds the design resolution.");
+        if (ResolveEntityPath(path, out EntityName name, out Entity? parent))
+        {
+            var texture = SpriteTexture.SolidColor(RgbaFloat.Clear, new DesignSizeU(width, height));
+            _world.AddEntity(new Sprite(name, parent, priority, texture));
+        }
+    }
+
+    public override void SetSurface(in EntityQuery effect, string target)
+    {
+        Sprite? surface = null;
+        if (target.Length != 0 && !target.Equals("null", StringComparison.OrdinalIgnoreCase))
+        {
+            var targets = Query(EntityQuery.Parse(target));
+            if (targets.AsSpan() is not [Sprite sprite])
+                throw new InvalidOperationException($"Drawing surface '{target}' was not found or is ambiguous.");
+            surface = sprite;
+        }
+        foreach (Entity entity in Query(effect))
+        {
+            if (entity is PlainEffect plain) plain.Surface = surface;
+        }
+    }
+
+    public override void Draw()
+    {
+        Process process = _world.CurrentProcess;
+        RenderContext render = _ctx.RenderContext;
+        foreach (Entity entity in process.DescendantsAndSelf())
+        {
+            if (entity is not PlainEffect { Surface: { IsPendingDestruction: false } surface } effect) continue;
+            // Draw records the current composition before the script changes its layers.
+            long started = Stopwatch.GetTimestamp();
+            var wait = new System.Threading.SpinWait();
+            while (!_ctx.Content.ResolveAssets())
+            {
+                if (Stopwatch.GetElapsedTime(started) >= TimeSpan.FromSeconds(5))
+                    throw new TimeoutException("Textures for the drawing surface did not finish loading.");
+                wait.SpinOnce();
+            }
+            Vector3 origin = effect.Transform.Position;
+            DesignSize size = surface.GetSize(render);
+            if (!float.IsFinite(origin.X) || !float.IsFinite(origin.Y)
+                || origin.X < 0 || origin.Y < 0 || origin.X + size.Width > render.DesignResolution.Width
+                || origin.Y + size.Height > render.DesignResolution.Height)
+                throw new ArgumentOutOfRangeException(nameof(origin), "The effect capture is outside the design resolution.");
+            var rectangle = new DesignRectU((uint)origin.X, (uint)origin.Y, (uint)size.Width, (uint)size.Height);
+            surface.ReplaceTexture(render.GraphicsDevice, process.CaptureBelow(_ctx, effect, surface, rectangle));
+        }
+    }
+
     public override void CreateFrameAnimation(in EntityPath path, int priority, NsCoordinate x, NsCoordinate y,
         ReadOnlySpan<string> frames, int ticksPerFrame, string finalFrame, bool removeOnCompletion, bool loop, bool wait)
     {
@@ -220,6 +278,9 @@ internal sealed partial class Builtins : BuiltInFunctions
         {
             return _ctx.RenderContext.CapturePresentedFrame(sourceRect);
         }
+        if (Path.GetFileName(source).Equals("thum.npf", StringComparison.OrdinalIgnoreCase)
+            && _ctx.Saves.OpenThumbnail(source) is { } thumbnail)
+            return SpriteTexture.FromOwnedTexture(_ctx.Content.LoadTexture(thumbnail), sourceRectangle: sourceRect);
         if (_ctx.Content.RequestTexture(source) is { } assetRef)
         {
             return SpriteTexture.FromAsset(assetRef, sourceRect);
@@ -270,14 +331,29 @@ internal sealed partial class Builtins : BuiltInFunctions
         => _world.CurrentProcess.FontSettings = _world.CurrentProcess.FontSettings with { VerticalGlyphs = vertical };
 
     public override int GetMediaDuration(in EntityQuery query)
+        => ToMediaMilliseconds(GetMediaTimes(query).Duration);
+
+    public override int GetTimeElapsed(in EntityQuery query)
+        => ToMediaMilliseconds(GetMediaTimes(query).Elapsed);
+
+    public override int GetTimeRemaining(in EntityQuery query)
+    {
+        var (duration, elapsed) = GetMediaTimes(query);
+        return ToMediaMilliseconds(duration - elapsed);
+    }
+
+    private (TimeSpan Duration, TimeSpan Elapsed) GetMediaTimes(in EntityQuery query)
     {
         foreach (Entity entity in Query(query))
         {
-            TimeSpan? duration = entity switch { AudioEntity audio => audio.Duration, Video video => video.Duration, _ => null };
-            if (duration is { } value) return (int)Math.Clamp(value.TotalMilliseconds, 0, int.MaxValue);
+            if (entity is AudioEntity audio) return (audio.Duration, audio.Elapsed);
+            if (entity is Video video) return (video.Duration, video.Elapsed);
         }
-        return 0;
+        return default;
     }
+
+    private static int ToMediaMilliseconds(TimeSpan value)
+        => (int)Math.Clamp(value.TotalMilliseconds, 0, int.MaxValue);
 
     public override void CreateDialogueBox(in EntityPath entityPath, int priority,
         NsCoordinate x, NsCoordinate y, uint width, uint height, bool inheritTransform)
@@ -297,7 +373,7 @@ internal sealed partial class Builtins : BuiltInFunctions
         if (ResolveEntityPath(path, out EntityName name, out Entity? parent) && parent is RenderItem box)
         {
             var page = _world.AddEntity(new DialoguePage(name, parent, box.Priority,
-                blockToken, maxWidth, maxHeight, lineSpacing));
+                blockToken, maxWidth, maxHeight, lineSpacing, _ctx.Profile.DialogueFontScale));
             page.ScriptScope = CurrentThread.EntityContext;
             page.Transform.Position = box.Transform.Position;
             page.SetAlias(EntityAlias.Parse(blockToken.BlockName));
@@ -418,7 +494,7 @@ internal sealed partial class Builtins : BuiltInFunctions
         {
             if (entity is Scrollbar scrollbar)
             {
-                if (HandleScrollbar(scrollbar)) return true;
+                if (scrollbar.ScrollTarget is not BacklogView && HandleScrollbar(scrollbar)) return true;
                 continue;
             }
             ChoiceEntity? choice = ChoiceEntity.FindOwner(entity);

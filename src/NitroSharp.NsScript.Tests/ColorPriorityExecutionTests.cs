@@ -43,6 +43,18 @@ public sealed class ColorPriorityExecutionTests
     }
 
     [Theory]
+    [InlineData("0xffffff", 0xffffff)]
+    [InlineData("0x123ABC", 0x123abc)]
+    [InlineData("0X000000", 0)]
+    public void LegacyRgbArgumentsReachTheRectangle(string literal, int rgb)
+    {
+        var result = Run($$"""
+            chapter main { CreateColor("rect", 10, 0, 0, 2, 2, {{literal}}); }
+            """);
+        Assert.Equal(NsColor.FromRgb(rgb), Assert.Single(result.Colors));
+    }
+
+    [Theory]
     [InlineData("＃＃FFFFFF")]
     [InlineData("＃FFGGFF")]
     [InlineData("＃ＦＦＦＦＦＦ")]

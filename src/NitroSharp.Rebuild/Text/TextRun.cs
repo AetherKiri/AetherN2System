@@ -26,6 +26,9 @@ internal readonly struct TextRun
     public bool DrawOutline => (Flags & TextRunFlags.Outline) == TextRunFlags.Outline;
     public bool HasRubyText => (Flags & TextRunFlags.RubyText) == TextRunFlags.RubyText;
 
+    public TextRun WithFontSize(PtFontSize size)
+        => new(Font, size, Color, DrawOutline ? OutlineColor : null, Text, RubyText);
+
     public static TextRun Regular(
         ReadOnlyMemory<char> text,
         FontFaceKey font, PtFontSize ptFontSize,

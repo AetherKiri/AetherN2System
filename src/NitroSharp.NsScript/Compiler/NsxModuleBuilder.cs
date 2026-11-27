@@ -14,6 +14,7 @@ internal sealed class NsxModuleBuilder
     private readonly TokenMap<SourceFileSymbol> _externalSourceFiles;
     private readonly TokenMap<string> _stringHeap;
     private ArrayBuilder<SourceMapping> _sourceMappings = new(initialCapacity: 1024);
+    private readonly List<(CodeOffset Offset, byte ArgumentCount)> _partialCalls = [];
 
     public NsxModuleBuilder(EmitContext emitContext, SourceFileSymbol sourceFile)
     {
@@ -68,6 +69,9 @@ internal sealed class NsxModuleBuilder
     {
         _sourceMappings.Add(range);
     }
+
+    // Keep executable offsets intact so checkpoints made before this metadata still resume.
+    public void AddPartialCall(CodeOffset offset, byte argumentCount) => _partialCalls.Add((offset, argumentCount));
 
     public void Emit(Stream outputStream)
     {
@@ -146,6 +150,7 @@ internal sealed class NsxModuleBuilder
         FileOffset dbgTableOffset = stringTableOffset  + stringTableSize;
         const int dbgEntrySize = 4 * sizeof(int);
         int dbgTableSize = NsxConstants.TableHeaderSize + SourceMappings.Length * dbgEntrySize + 6;
+        dbgTableSize += _partialCalls.Count * (sizeof(int) + sizeof(byte));
         FileOffset codeSectionStart = dbgTableOffset + dbgTableSize;
 
         // Build the subroutine offset table (SUB)
@@ -194,6 +199,11 @@ internal sealed class NsxModuleBuilder
         }
 
         dbgWriter.WriteBytes(NsxConstants.TableEndMarker);
+        foreach (var (offset, argumentCount) in _partialCalls)
+        {
+            dbgWriter.WriteInt32LE(offset);
+            dbgWriter.WriteByte(argumentCount);
+        }
 
         Span<byte> dbgHeader = stackalloc byte[NsxConstants.TableHeaderSize];
         fillTableHeader(dbgHeader, NsxConstants.DebugTableMarker, dbgWriter.Position);

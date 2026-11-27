@@ -44,6 +44,8 @@ internal sealed class InputContext(GameWindow window) : IDisposable
     private bool IsActionTriggered(InputAction action) => _actionTriggered[(int)action];
 
     internal Vector2 MousePosition => Snapshot.MousePosition;
+    internal float WheelDelta => Snapshot.WheelDelta.Y;
+    internal bool BacklogKeyPressed => Snapshot.IsKeyDown(Key.B);
     internal bool IsMouseButtonDown(MouseButton button) => Snapshot.IsMouseDown(button);
     internal bool WasActionTriggered(InputAction action) => _actionTriggered[(int)action];
     internal bool PointerMoved { get; private set; }
@@ -124,6 +126,7 @@ internal sealed class InputContext(GameWindow window) : IDisposable
         set(out sys.LeftButtonDown, Snapshot.IsMouseDown(MouseButton.Left));
         set(out sys.ReturnKeyDown, Snapshot.IsKeyDown(Key.Return) || Snapshot.IsKeyDown(Key.KeypadEnter));
         set(out sys.EscapeKeyDown, Snapshot.IsKeyDown(Key.Escape));
+        set(out sys.BacklogKeyDown, BacklogKeyPressed);
         set(out sys.X360StartButtonDown, IsActionDown(InputAction.Advance));
         set(out sys.X360AButtonDown, IsActionDown(InputAction.Advance));
         set(out sys.X360BButtonDown, IsActionDown(InputAction.Back));

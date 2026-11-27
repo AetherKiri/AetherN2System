@@ -1,54 +1,41 @@
 ﻿using System;
 using NitroSharp.Content;
 using NitroSharp.Graphics.Core;
-using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using Veldrid;
 
 namespace NitroSharp.Graphics;
 
-internal sealed class AnimatedIcons(Icon? waitLine) : IDisposable
+internal sealed class AnimatedIcons(Icon? waitLine, Icon? waitPage, Icon? waitAuto, Icon? backlogVoice) : IDisposable
 {
     public Icon? WaitLine { get; } = waitLine;
+    public Icon? WaitPage { get; } = waitPage;
+    public Icon? WaitAuto { get; } = waitAuto;
+    public Icon? BacklogVoice { get; } = backlogVoice;
 
     public void Dispose()
     {
         WaitLine?.Dispose();
+        WaitPage?.Dispose();
+        WaitAuto?.Dispose();
+        BacklogVoice?.Dispose();
     }
 }
 
 internal sealed class Icon : IDisposable
 {
-    private sealed class IconAnimation// : UIntAnimation<Icon>
-    {
-        // public IconAnimation(
-        //     Icon icon,
-        //     uint startValue, uint endValue,
-        //     TimeSpan duration)
-        //     : base(icon, startValue, endValue, duration, NsEaseFunction.Linear, repeat: true)
-        // {
-        // }
-        //
-        // protected override ref uint GetValueRef() => ref _entity._activeFrame;
-    }
-
     private readonly Texture _texture;
-    private readonly IconAnimation _animation;
-    // Icon animation is currently disabled, so render the first layer.
-    private readonly uint _activeFrame = 0;
+    public DesignSize Size => new(_texture.Width, _texture.Height);
 
     private Icon(Texture texture)
     {
         _texture = texture;
-        uint frameCount = _texture.ArrayLayers;
-        var duration = TimeSpan.FromMilliseconds(frameCount * 120);
-        //_animation = new IconAnimation(this, 0, frameCount - 1, duration);
-        _animation = new();
     }
 
     public static bool Exists(ContentManager content, IconPathPattern pathPattern)
     {
+        if (pathPattern.IconCount == 0) return false;
         foreach (string path in pathPattern.EnumeratePaths())
         {
             using Stream? stream = content.TryOpenStream(path);
@@ -87,41 +74,31 @@ internal sealed class Icon : IDisposable
                 texture.Width, texture.Height,
                 depth: 1, layerCount: 1
             );
+            GraphicsUtils.DisposeAfterIdle(renderContext.GraphicsDevice, staging);
         }
         cl.End();
         renderContext.GraphicsDevice.SubmitCommands(cl);
         renderContext.CommandListPool.Return(cl);
 
-        Debug.Assert(texture is not null);
-        return new Icon(texture);
+        return new Icon(texture!);
     }
 
-    public void Reset()
-    {
-        // _animation.Reset();
-    }
-
-    public void Update(float dt)
-    {
-        // _animation.Update(dt);
-    }
-
-    public void Render(RenderContext context, Vector2 position)
+    public void Render(RenderContext context, Matrix4x4 transform, float elapsed, float opacity)
     {
         DrawBatch batch = context.MainBatch;
         IconShaderResources shaderResources = context.ShaderResources.Icon;
         ViewProjection vp = context.OrthoProjection;
 
-        var transform = Matrix4x4.CreateTranslation(new Vector3(position, 0));
         var quad = QuadPrimitive.Create(
-            new DesignSize(_texture.Width, _texture.Height),
+            Size,
             transform,
             uvTopLeft: Vector2.Zero,
             uvBottomRight: Vector2.One,
-            color: Vector4.One
+            color: new Vector4(1, 1, 1, opacity)
         );
 
-        var quadUV3 = QuadPrimitiveUV3.FromQuad(quad, layer: _activeFrame);
+        uint frame = (uint)(elapsed / 120) % _texture.ArrayLayers;
+        var quadUV3 = QuadPrimitiveUV3.FromQuad(quad, layer: frame);
         PrimitiveSlice<QuadVertexUV3> slice = context.QuadsUV3.Append(quadUV3.AsSpan());
 
         batch.PushDraw(new Draw
@@ -136,7 +113,7 @@ internal sealed class Icon : IDisposable
                 )
             ),
             BufferBindings = new BufferBindings(slice.Vertices.Buffer, slice.Indices.Buffer),
-            Params = DrawParams.Indexed(0, 0, 6)
+            Params = DrawParams.Indexed(0, slice.IndexBase, 6)
         });
     }
 

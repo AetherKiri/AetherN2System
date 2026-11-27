@@ -15,6 +15,7 @@ internal static class WellKnownSymbols
         {
             s_builtInFunctions[function.ToString()] = function;
         }
+        s_builtInFunctions["FileExists"] = BuiltInFunction.AvailableFile;
 
         s_builtInConstants = new Dictionary<string, BuiltInConstant>(StringComparer.OrdinalIgnoreCase);
         foreach (BuiltInConstant enumValue in Enum.GetValues<BuiltInConstant>())

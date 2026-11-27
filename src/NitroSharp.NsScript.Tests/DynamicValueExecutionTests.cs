@@ -30,6 +30,37 @@ public sealed class DynamicValueExecutionTests
     }
 
     [Fact]
+    public void FileExistsCanSkipMissingAnimationFrames()
+    {
+        var builtins = Execute("""
+            chapter main {
+                $frame = 2;
+                $path = String("cg/frame%03d.png", $frame);
+                while (!FileExists($path)) {
+                    $frame++;
+                    $path = String("cg/frame%03d.png", $frame);
+                }
+                assert(AvailableFile($path));
+                CreateChoice($path);
+            }
+            """);
+        Assert.Equal("cg/frame003.png", Assert.Single(builtins.Choices));
+    }
+
+    [Fact]
+    public void QuotedBuiltInNameMatchesAForwardedString()
+    {
+        var builtins = Execute("""
+            chapter main { CheckWipe("normal"); CheckWipe("down"); }
+            function CheckWipe($mode) {
+                if ($mode == "normal") CreateChoice("instant");
+                if ("normal" != $mode) CreateChoice("mask");
+            }
+            """);
+        Assert.Equal(new[] { "instant", "mask" }, builtins.Choices);
+    }
+
+    [Fact]
     public void VariableValueReadsAndWritesTypedGlobalsAndIndexedNodes()
     {
         Execute("""
@@ -204,6 +235,7 @@ public sealed class DynamicValueExecutionTests
         public List<string> InvalidFormats { get; } = [];
         public override void AssertTrue(bool value) => Assert.True(value);
         public override void CreateChoice(in EntityPath path) => Choices.Add(path.ToString());
+        public override bool FileExists(string path) => path == "cg/frame003.png";
         public override void ReportInvalidArgument(string functionName, string argumentName, in ConstantValue value)
         {
             Assert.Equal("String", functionName);

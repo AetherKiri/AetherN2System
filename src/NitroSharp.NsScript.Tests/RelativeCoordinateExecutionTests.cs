@@ -23,6 +23,7 @@ public sealed class RelativeCoordinateExecutionTests
                 chapter main {
                     SetComic(@0, @0);
                     SetComic(@20, @-10);
+                    Quake(@12, 60);
                 }
                 function SetComic($COMIC_X, $COMIC_Y) {
                     Move("heart", 0, @$COMIC_X, @$COMIC_Y, null, true);
@@ -36,6 +37,11 @@ public sealed class RelativeCoordinateExecutionTests
                     $negative = "@" + "-" + 5;
                     Move("heart", 0, $negative, "@2.5", null, true);
                 }
+                function Quake($x, $y) {
+                    $x = -$x;
+                    $y = -$y;
+                    Move("screen", 34, $x, $y, null, true);
+                }
                 """, Encoding.UTF8);
             var compilation = new Compilation(root, Encoding.UTF8);
             var emitted = compilation.Emit([compilation.GetSourceModule("test.nss")], root, "globals");
@@ -46,7 +52,7 @@ public sealed class RelativeCoordinateExecutionTests
             var builtins = new TestBuiltins();
             for (int i = 0; i < 100 && !thread.DoneExecuting; i++) vm.Tick(ref thread, builtins);
             Assert.True(thread.DoneExecuting);
-            Assert.Equal(new[] { (0f, 0f), (10f, 30f), (10f, 6f), (-5f, 2.5f), (20f, -10f), (30f, 20f), (30f, -4f), (-5f, 2.5f) }, builtins.Positions);
+            Assert.Equal(new[] { (0f, 0f), (10f, 30f), (10f, 6f), (-5f, 2.5f), (20f, -10f), (30f, 20f), (30f, -4f), (-5f, 2.5f), (-12f, -60f) }, builtins.Positions);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -100,7 +106,7 @@ public sealed class RelativeCoordinateExecutionTests
             Assert.Equal(NsCoordinateKind.Value, x.Kind);
             Assert.Equal(NsCoordinateKind.Value, y.Kind);
             Assert.True(x.Value.isRelative);
-            Assert.True(y.Value.isRelative);
+            Assert.Equal(query.ToString() != "screen", y.Value.isRelative);
             Positions.Add((x.Value.pos, y.Value.pos));
         }
     }
