@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -14,7 +15,23 @@ internal sealed partial class Builtins
     {
         string native = SaveTextFileIO.NativePath(path);
         string? saved = SaveTextFileIO.ResolvePath(SaveTextDirectory, native);
-        if (saved is not null && File.Exists(saved)) return SaveTextFileIO.Read(saved);
+        if (saved is not null && File.Exists(saved))
+        {
+            string text = SaveTextFileIO.Read(saved);
+            // The Hanachirasu script formats hours with division, which yields a float in NSS.
+            if (_ctx.Profile.NpaScheme == "hanachirasu" && Path.GetFileName(saved) == "tm.npf")
+            {
+                int separator = text.IndexOf(':');
+                if (separator > 0)
+                {
+                    string hours = text[..separator].Replace("<PRE>0</PRE>", "", StringComparison.Ordinal);
+                    if (double.TryParse(hours, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+                        && value >= 0 && value <= int.MaxValue)
+                        return ((int)value).ToString("D2", CultureInfo.InvariantCulture) + text[separator..];
+                }
+            }
+            return text;
+        }
         // Relative authored files may live in an archive rather than beside the
         // executable. Savedata remains a normal writable directory on mobile.
         if (Path.IsPathRooted(native)) return "";

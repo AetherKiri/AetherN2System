@@ -40,4 +40,10 @@ internal sealed partial class Builtins
         if (ResolveEntityPath(path, out EntityName name, out Entity? parent))
             _world.AddEntity(new BacklogView(name, parent, priority, _backlog.ToArray()));
     }
+
+    internal void ReplayBacklogVoice(Process process, VoiceSegment voice)
+    {
+        _log.Debug($"Replaying backlog voice '{voice.FileName}'.");
+        ApplyDialogueVoice(process, voice, skipping: false);
+    }
 }

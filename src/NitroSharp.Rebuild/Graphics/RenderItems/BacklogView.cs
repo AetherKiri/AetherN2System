@@ -12,8 +12,9 @@ internal readonly record struct BacklogEntry(string Text, VoiceSegment? Voice);
 internal sealed class BacklogView(EntityName name, Entity? parent, int priority, BacklogEntry[] entries)
     : RenderItem(name, parent, priority)
 {
-    private readonly List<(TextLayout Layout, VoiceSegment? Voice)> _rows = [];
+    private readonly List<(TextLayout Layout, VoiceSegment? Voice, int FirstLine)> _rows = [];
     private bool _laidOut;
+    private int _lineCount;
     private int _scroll;
     private int _pageSize = 17;
     private float _lineHeight = 30;
@@ -37,7 +38,7 @@ internal sealed class BacklogView(EntityName name, Entity? parent, int priority,
         return true;
     }
 
-    private void ScrollRows(int delta) => _scroll = Math.Clamp(_scroll + delta, 0, Math.Max(0, _rows.Count - 1));
+    private void ScrollRows(int delta) => _scroll = Math.Clamp(_scroll + delta, 0, Math.Max(0, _lineCount - _pageSize));
 
     public override void Update(GameContext ctx)
     {
@@ -57,7 +58,9 @@ internal sealed class BacklogView(EntityName name, Entity? parent, int priority,
                 var layout = new TextLayout((uint)width, uint.MaxValue, fixedLineHeight: _lineHeight);
                 layout.Append(render.GlyphRasterizer, TextRun.Regular(entry.Text.AsMemory(), font.DefaultFont,
                     font.DefaultFontSize, new RgbaFloat(font.DefaultTextColor), null));
-                _rows.Add((layout, entry.Voice));
+                if (layout.Lines.IsEmpty) continue;
+                _rows.Add((layout, entry.Voice, _lineCount));
+                _lineCount += layout.Lines.Length;
             }
             _laidOut = true;
         }
@@ -66,45 +69,52 @@ internal sealed class BacklogView(EntityName name, Entity? parent, int priority,
 
         Icon? speaker = render.Icons.BacklogVoice;
         Vector2 pointer = Scrollbar.ToDesignPosition(render, ctx.InputContext.MousePosition);
-        foreach (var (layout, voice, y) in VisibleRows())
+        foreach (var (layout, voice, y, _, _) in VisibleRows())
         {
             render.Text.RequestGlyphs(layout);
             if (voice is not null && speaker is not null && ctx.InputContext.ChoicePointerPressed
                 && pointer.X >= _voiceX && pointer.X < _voiceX + speaker.Size.Width
                 && pointer.Y >= y && pointer.Y < y + speaker.Size.Height
                 && ctx.InputContext.ConsumeChoicePress(pointer: true))
-                ctx.Builtins.ApplyDialogueVoice(Process, voice, skipping: false);
+                ctx.Builtins.ReplayBacklogVoice(Process, voice);
         }
     }
 
-    private IEnumerable<(TextLayout Layout, VoiceSegment? Voice, float Y)> VisibleRows()
+    private IEnumerable<(TextLayout Layout, VoiceSegment? Voice, float Y, int FirstLine, int EndLine)> VisibleRows()
     {
-        int end = _rows.Count - _scroll;
-        float remaining = _pageSize * _lineHeight;
-        int start = end;
-        while (start > 0 && remaining > 0)
-            remaining -= RowHeight(_rows[--start].Layout);
-        float y = _position.Y;
-        for (int i = start; i < end; i++)
+        int end = _lineCount - _scroll;
+        int start = Math.Max(0, end - _pageSize);
+        foreach (var (layout, voice, firstLine) in _rows)
         {
-            var (layout, voice) = _rows[i];
-            yield return (layout, voice, y);
-            y += RowHeight(layout);
+            if (firstLine >= end) yield break;
+            int firstVisible = Math.Max(firstLine, start);
+            int endVisible = Math.Min(firstLine + layout.Lines.Length, end);
+            if (firstVisible >= endVisible) continue;
+            float y = _position.Y + (firstVisible - start) * _lineHeight;
+            yield return (layout, firstLine == firstVisible ? voice : null, y,
+                firstVisible - firstLine, endVisible - firstLine);
         }
     }
-
-    private float RowHeight(TextLayout layout) => Math.Max(1, layout.Lines.Length) * _lineHeight;
 
     public override void Render(GameContext ctx)
     {
         RenderContext render = ctx.RenderContext;
         var clip = new ScreenRectU(PointU<ScreenPixel>.Zero, render.RenderResolution);
-        foreach (var (layout, voice, y) in VisibleRows())
+        foreach (var (layout, voice, y, firstLine, endLine) in VisibleRows())
         {
             Transform transform = Transform;
             transform.Position += new Vector3(_position.X, y, 0);
             Matrix4x4 matrix = render.GetTransformMatrix(transform, default, useScaling: true, aligned: false);
-            render.Text.Render(render, render.MainBatch, layout, matrix, Vector2.Zero, clip, Color.A);
+            int glyphStart = layout.Lines[firstLine].GlyphSpan.Start.Value;
+            int glyphEnd = layout.Lines[endLine - 1].GlyphSpan.End.Value;
+            var offset = new Vector2(0, -firstLine * _lineHeight);
+            foreach (var run in layout.GlyphRuns)
+            {
+                int start = Math.Max(glyphStart, run.GlyphSpan.Start.Value);
+                int end = Math.Min(glyphEnd, run.GlyphSpan.End.Value);
+                if (start < end)
+                    render.Text.Render(render, render.MainBatch, layout, run.WithSpan(start..end), matrix, offset, clip, Color.A);
+            }
             if (voice is not null && render.Icons.BacklogVoice is { } icon)
                 icon.Render(render, Matrix4x4.CreateTranslation(_voiceX - _position.X, 0, 0) * matrix, 0, Color.A);
         }
