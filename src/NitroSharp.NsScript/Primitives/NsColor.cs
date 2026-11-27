@@ -51,6 +51,8 @@ public readonly record struct NsColor
         ReadOnlySpan<char> codeStr = colorString.StartsWith('#') || colorString.StartsWith('＃')
             ? colorString.AsSpan(1)
             : colorString;
+        if (colorString.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            codeStr = colorString.AsSpan(2);
 
         if (int.TryParse(codeStr, NumberStyles.HexNumber, null, out int colorCode))
         {
