@@ -328,14 +328,29 @@ internal sealed partial class Builtins : BuiltInFunctions
         => _world.CurrentProcess.FontSettings = _world.CurrentProcess.FontSettings with { VerticalGlyphs = vertical };
 
     public override int GetMediaDuration(in EntityQuery query)
+        => ToMediaMilliseconds(GetMediaTimes(query).Duration);
+
+    public override int GetTimeElapsed(in EntityQuery query)
+        => ToMediaMilliseconds(GetMediaTimes(query).Elapsed);
+
+    public override int GetTimeRemaining(in EntityQuery query)
+    {
+        var (duration, elapsed) = GetMediaTimes(query);
+        return ToMediaMilliseconds(duration - elapsed);
+    }
+
+    private (TimeSpan Duration, TimeSpan Elapsed) GetMediaTimes(in EntityQuery query)
     {
         foreach (Entity entity in Query(query))
         {
-            TimeSpan? duration = entity switch { AudioEntity audio => audio.Duration, Video video => video.Duration, _ => null };
-            if (duration is { } value) return (int)Math.Clamp(value.TotalMilliseconds, 0, int.MaxValue);
+            if (entity is AudioEntity audio) return (audio.Duration, audio.Elapsed);
+            if (entity is Video video) return (video.Duration, video.Elapsed);
         }
-        return 0;
+        return default;
     }
+
+    private static int ToMediaMilliseconds(TimeSpan value)
+        => (int)Math.Clamp(value.TotalMilliseconds, 0, int.MaxValue);
 
     public override void CreateDialogueBox(in EntityPath entityPath, int priority,
         NsCoordinate x, NsCoordinate y, uint width, uint height, bool inheritTransform)
