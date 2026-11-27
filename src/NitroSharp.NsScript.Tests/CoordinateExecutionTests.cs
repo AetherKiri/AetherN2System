@@ -21,6 +21,8 @@ public sealed class CoordinateExecutionTests
                 Forward("clickable");
                 Forward("UNCLICKABLE");
                 Forward(Clickable);
+                Request("@choice", Enter);
+                Request("@choice", Erase);
                 Request("@choice", Lock);
                 Request("@choice", UnLock);
                 Request("@worker", Start);
@@ -32,9 +34,11 @@ public sealed class CoordinateExecutionTests
             """);
         Assert.Equal(new[]
         {
+            ("@choice", NsEntityAction.UseHandCursor), ("@choice", NsEntityAction.UseArrowCursor),
+            ("@choice", NsEntityAction.UseHandCursor), ("@choice", NsEntityAction.UseArrowCursor),
+            ("@choice", NsEntityAction.UseHandCursor),
             ("@choice", NsEntityAction.Enable), ("@choice", NsEntityAction.Disable),
-            ("@choice", NsEntityAction.Enable), ("@choice", NsEntityAction.Disable),
-            ("@choice", NsEntityAction.Enable), ("@choice", NsEntityAction.Lock),
+            ("@choice", NsEntityAction.Lock),
             ("@choice", NsEntityAction.Unlock), ("@worker", NsEntityAction.Start),
             ("@worker", NsEntityAction.Stop), ("@sound", NsEntityAction.Play),
             ("@sprite", NsEntityAction.Disable)
