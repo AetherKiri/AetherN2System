@@ -119,9 +119,14 @@ internal sealed class NpaFile : ArchiveFile
     {
         byte[][] candidates = scheme?.ToLowerInvariant() switch
         {
-            null or "" or "auto" => [NpaCipherTables.Muramasa.ToArray(), NpaCipherTables.MuramasaAd.ToArray()],
+            null or "" or "auto" => [
+                NpaCipherTables.Muramasa.ToArray(),
+                NpaCipherTables.MuramasaAd.ToArray(),
+                NpaCipherTables.Hanachirasu.ToArray(),
+            ],
             "muramasa" => [NpaCipherTables.Muramasa.ToArray()],
             "muramasa-ad" => [NpaCipherTables.MuramasaAd.ToArray()],
+            "hanachirasu" => [NpaCipherTables.Hanachirasu.ToArray()],
             _ => throw Invalid("Unknown NPA encryption scheme: " + scheme),
         };
         if (!string.IsNullOrWhiteSpace(scheme) && !scheme.Equals("auto", StringComparison.OrdinalIgnoreCase))

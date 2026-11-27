@@ -55,6 +55,10 @@ internal sealed class BuiltInFunctionDispatcher
             case BuiltInFunction.OpenSaveMenu:
                 _impl.OpenSaveMenu(args.TakeBool());
                 break;
+            case BuiltInFunction.EnableDirect3DHAL:
+                // The runtime does not expose the original Direct3D HAL.
+                SetResult(ConstantValue.False);
+                break;
             case BuiltInFunction.DrawLegacyTransition:
                 EntityQuery legacyQuery = args.TakeEntityQuery();
                 TimeSpan legacyDuration = args.TakeTimeSpan();

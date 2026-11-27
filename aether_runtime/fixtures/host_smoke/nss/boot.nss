@@ -1,5 +1,6 @@
 chapter main
 {
+    assert_eq(EnableDirect3DHAL(), false);
     CreateColor("screen", 20000i, 0, 0, 320, 180, "＃0000FF");
     Move("screen", 0, cehter, 0, null, false);
     Move("screen", 0, @, @0, null, false);

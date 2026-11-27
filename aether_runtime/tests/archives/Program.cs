@@ -9,7 +9,7 @@ Directory.CreateDirectory(temporary);
 try
 {
     byte[] text = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("chapter main { WaitKey(); }\n", 400)));
-    foreach (string scheme in new[] { "muramasa", "muramasa-ad" })
+    foreach (string scheme in new[] { "muramasa", "muramasa-ad", "hanachirasu" })
     foreach (bool encrypted in new[] { false, true })
     foreach (bool compressed in new[] { false, true })
     {
@@ -47,7 +47,7 @@ try
         }
         Console.WriteLine($"{Path.GetFileName(path)}: {archive.FileNames.Count()} entries, {bytes} decoded bytes");
     }
-    Console.WriteLine("NPA_ARCHIVE_SMOKE_OK: compression, both ciphers, seek, tagged header, bounds");
+    Console.WriteLine("NPA_ARCHIVE_SMOKE_OK: compression, three ciphers, seek, tagged header, bounds");
 }
 finally { Directory.Delete(temporary, recursive: true); }
 
@@ -66,7 +66,13 @@ static void WriteArchive(string path, byte[] original, string scheme, bool encry
     uint key = unchecked(key1 * key2);
     if (encrypted)
     {
-        var table = scheme == "muramasa" ? NpaCipherTables.Muramasa : NpaCipherTables.MuramasaAd;
+        var table = scheme switch
+        {
+            "muramasa" => NpaCipherTables.Muramasa,
+            "muramasa-ad" => NpaCipherTables.MuramasaAd,
+            "hanachirasu" => NpaCipherTables.Hanachirasu,
+            _ => throw new ArgumentException("Unknown test scheme.", nameof(scheme)),
+        };
         byte[] inverse = new byte[256];
         for (int i = 0; i < 256; i++) inverse[table[i]] = (byte)i;
         uint nameKey = 0x87654321;
