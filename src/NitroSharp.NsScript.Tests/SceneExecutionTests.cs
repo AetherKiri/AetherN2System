@@ -15,6 +15,33 @@ public sealed class SceneExecutionTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void OmittedFunctionArgumentClearsThePreviousValue(bool crossModule)
+    {
+        const string helper = """
+            function ShowDialog($image, $mode) {
+                if ($mode == "saved") { CreateChoice("saved"); return; }
+                CreateChoice($image);
+            }
+            """;
+        const string chapter = """
+            chapter main {
+                ShowDialog("complete", "saved");
+                ShowDialog("confirm");
+            }
+            """;
+        using var script = crossModule
+            ? new ScriptFiles("#include \"helpers.nss\"\n" + chapter, "", additionalSources: new Dictionary<string, string>
+            {
+                ["helpers.nss"] = helper
+            })
+            : new ScriptFiles(helper + "\n" + chapter, "");
+
+        Assert.Equal(new[] { "saved", "confirm" }, script.Run().Choices);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void DynamicSceneCanUseBytecodeWithoutCallerSource(bool keepEpisode)
     {
         using var script = new ScriptFiles("""

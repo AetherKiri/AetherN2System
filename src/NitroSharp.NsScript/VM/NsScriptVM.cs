@@ -658,19 +658,18 @@ public sealed class NsScriptVM
                     evalStack.Pop();
                     break;
                 case Opcode.Call:
-                    ushort subroutineToken = program.DecodeToken();
+                case Opcode.CallFar:
+                    CodeOffset callOffset = program.Position - 1;
+                    CallFrame newFrame = opcode == Opcode.Call
+                        ? CreateEntryPointCallFrame(frame.Module, program.DecodeToken())
+                        : externalCall(ref program);
+                    ClearOmittedArguments(thisModule, callOffset, newFrame);
                     frame.ProgramCounter = program.Position;
-                    CallFrame newFrame = CreateEntryPointCallFrame(frame.Module, subroutineToken);
                     thread.CallFrameStack.Push(newFrame);
-                    if (_log.IsDebugEnabled)
+                    if (opcode == Opcode.Call && _log.IsDebugEnabled)
                     {
                         logCall(newFrame);
                     }
-                    return TickResult.Ok;
-                case Opcode.CallFar:
-                    newFrame = externalCall(ref program);
-                    frame.ProgramCounter = program.Position;
-                    thread.CallFrameStack.Push(newFrame);
                     return TickResult.Ok;
                 case Opcode.CallChapter:
                 case Opcode.CallScene:
@@ -1055,6 +1054,17 @@ public sealed class NsScriptVM
             BinaryOperatorKind.Remainder => left % right,
             _ => throw ThrowHelper.UnexpectedValueOf<BinaryOperatorKind>()
         };
+    }
+
+    private void ClearOmittedArguments(NsxModule caller, CodeOffset offset, in CallFrame callee)
+    {
+        if (caller.PartialCalls?.TryGetValue(offset, out byte argumentCount) != true) return;
+        string[] parameters = callee.RuntimeInfo.ParameterNames;
+        for (int i = argumentCount; i < parameters.Length; i++)
+        {
+            if (GlobalsLookup.Variables.TryGetValue(parameters[i], out int slot))
+                GetVariable(slot) = ConstantValue.Null;
+        }
     }
 
     private static CallFrame CreateEntryPointCallFrame(NsxModule module, ushort subroutineIndex)

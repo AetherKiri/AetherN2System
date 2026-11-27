@@ -283,12 +283,11 @@ namespace NitroSharp.Graphics
 
         private AnimatedIcons LoadIcons(GameProfile gameProfile)
         {
-            Icon? waitLine = null;
-            if (Icon.Exists(Content, gameProfile.IconPathPatterns.WaitLine))
-            {
-                waitLine = Icon.Load(this, gameProfile.IconPathPatterns.WaitLine);
-            }
-            return new AnimatedIcons(waitLine);
+            var patterns = gameProfile.IconPathPatterns;
+            return new AnimatedIcons(Load(patterns.WaitLine), Load(patterns.WaitPage),
+                Load(patterns.WaitAuto), Load(patterns.BacklogVoice));
+
+            Icon? Load(IconPathPattern pattern) => Icon.Exists(Content, pattern) ? Icon.Load(this, pattern) : null;
         }
 
         public void BeginFrame(in FrameStamp frameStamp)
@@ -457,11 +456,11 @@ namespace NitroSharp.Graphics
             }
         }
 
-        public unsafe void CopyRgba(Span<byte> destination)
+        public unsafe void CopyRgba(Span<byte> destination, RenderTarget? targetOverride = null)
         {
             using CommandList commands = ResourceFactory.CreateCommandList();
             commands.Begin();
-            Texture staging = _swapchainTarget.ReadBack(commands, ResourceFactory);
+            Texture staging = (targetOverride ?? _swapchainTarget).ReadBack(commands, ResourceFactory);
             commands.End();
             GraphicsDevice.SubmitCommands(commands);
             GraphicsDevice.WaitForIdle();

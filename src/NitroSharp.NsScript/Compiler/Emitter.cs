@@ -375,6 +375,8 @@ internal ref struct Emitter
         {
             Debug.Assert(lookupResult.Subroutine is not null);
             var function = (FunctionSymbol)lookupResult.Subroutine;
+            if (arguments.Length < function.Parameters.Length)
+                _module.AddPartialCall(_code.Position, (byte)arguments.Length);
             if (ReferenceEquals(function.DeclaringSourceFile, _subroutine.DeclaringSourceFile))
             {
                 EmitOpcode(Opcode.Call);

@@ -35,6 +35,12 @@ public enum NsEntityAction
     UseHandCursor,
     UseArrowCursor,
     HideWithText,
+    BacklogPreviousPage,
+    BacklogNextPage,
+    BacklogPreviousLine,
+    BacklogNextLine,
+    NoBacklog,
+    NoWaitIcon
 }
 
 public enum NsEaseFunction

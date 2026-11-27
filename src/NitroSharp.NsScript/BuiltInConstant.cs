@@ -147,6 +147,10 @@
         SemiHeavy,
         Light,
         Clickable,
-        UnClickable
+        UnClickable,
+        Prev,
+        Next,
+        Decrement,
+        Increment
     }
 }

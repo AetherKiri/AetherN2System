@@ -278,6 +278,9 @@ internal sealed partial class Builtins : BuiltInFunctions
         {
             return _ctx.RenderContext.CapturePresentedFrame(sourceRect);
         }
+        if (Path.GetFileName(source).Equals("thum.npf", StringComparison.OrdinalIgnoreCase)
+            && _ctx.Saves.OpenThumbnail(source) is { } thumbnail)
+            return SpriteTexture.FromOwnedTexture(_ctx.Content.LoadTexture(thumbnail), sourceRectangle: sourceRect);
         if (_ctx.Content.RequestTexture(source) is { } assetRef)
         {
             return SpriteTexture.FromAsset(assetRef, sourceRect);
@@ -491,7 +494,7 @@ internal sealed partial class Builtins : BuiltInFunctions
         {
             if (entity is Scrollbar scrollbar)
             {
-                if (HandleScrollbar(scrollbar)) return true;
+                if (scrollbar.ScrollTarget is not BacklogView && HandleScrollbar(scrollbar)) return true;
                 continue;
             }
             ChoiceEntity? choice = ChoiceEntity.FindOwner(entity);

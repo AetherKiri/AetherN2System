@@ -56,6 +56,16 @@ namespace NitroSharp.Text
         public ReadOnlySpan<float> OpacityValues => CollectionsMarshal.AsSpan(_opacityValues);
         public ReadOnlySpan<Line> Lines => CollectionsMarshal.AsSpan(_lines);
         public Rectangle<TUnit> BoundingBox => _boundingBox;
+        internal Vector2 EndOfLastLine
+        {
+            get
+            {
+                for (int i = _lines.Count - 1; i >= 0; i--)
+                    if (!_lines[i].IsEmpty)
+                        return new Vector2(_lines[i].Right, _glyphs[_lines[i].GlyphSpan.End.Value - 1].Position.Y);
+                return Vector2.Zero;
+            }
+        }
 
         public Size<TUnit> MaxBounds { get; }
 

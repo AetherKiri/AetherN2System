@@ -96,6 +96,9 @@ internal sealed partial class Scrollbar : Sprite
         if (!ctx.InputContext.PointerHeld) EndDrag();
     }
 
+    public override bool Request(NsEntityAction action)
+        => ScrollTarget is BacklogView backlog && backlog.Scroll(action) || base.Request(action);
+
     public override void Dispose()
     {
         EndDrag();

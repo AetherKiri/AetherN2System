@@ -5,11 +5,15 @@ using System.IO;
 using System.Text;
 using MessagePack;
 using NitroSharp.Common;
+using NitroSharp.Graphics;
+using NitroSharp.Graphics.Core;
 using NitroSharp.NsScript;
 using NitroSharp.NsScript.VM;
+using NitroSharp.Text;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
+using Image = SixLabors.ImageSharp.Image;
 
 namespace NitroSharp.Saving;
 
@@ -31,6 +35,7 @@ internal sealed class GameSaveManager
     }
     private byte[]? _pendingLoad;
     private byte[]? _storyThumbnail;
+    private bool _captureWithoutText;
 
     public GameSaveManager(GameContext context)
     {
@@ -51,6 +56,9 @@ internal sealed class GameSaveManager
         { context.RootLog.Warn($"Cannot load dialogue history: {error.Message}"); }
         UpdateSavePath();
         if (_storage.Exists(0)) RequestLoad(0);
+        if (context.Profile.DefaultTextSpeed is { } speed
+            && context.VM.GetHostFlag("SYSTEM_text_speed").AsNumber() is null)
+            context.VM.SetHostFlag("SYSTEM_text_speed", ConstantValue.Number(speed));
     }
 
     public string? LastError { get; private set; }
@@ -93,7 +101,7 @@ internal sealed class GameSaveManager
             {
                 // Validate framing before ending the requesting script slice.
                 using var reader = new BinaryReader(new MemoryStream(payload), Encoding.UTF8);
-                ReadCheckpoint(reader, out _, out _, out _);
+                ReadCheckpoint(reader, out _, out _, out _, out _);
                 _pendingLoad = payload;
             }
         }
@@ -112,7 +120,7 @@ internal sealed class GameSaveManager
         try
         {
             using var reader = new BinaryReader(new MemoryStream(payload), Encoding.UTF8);
-            ReadCheckpoint(reader, out byte[] variables, out byte[] scene, out byte[] thumbnail);
+            ReadCheckpoint(reader, out byte[] variables, out byte[] scene, out byte[] thumbnail, out BacklogEntry[] backlog);
             // Scene restoration can compile modules lazily. Load their saved
             // globals by name first, and retain current common flags/settings.
             _ctx.VM.RestoreVariables(ReadGlobals(variables));
@@ -122,6 +130,7 @@ internal sealed class GameSaveManager
             // newly loaded scene into a previous caller's slot.
             _pendingSaves.Clear();
             _ctx.Builtins.ResetInputState();
+            _ctx.Builtins.RestoreBacklog(backlog);
             _storyThumbnail = thumbnail;
             UpdateSavePath();
             LastError = null;
@@ -137,25 +146,31 @@ internal sealed class GameSaveManager
         }
     }
 
-    internal void CompletePendingSaves()
+    internal void CompletePendingSaves(RenderTarget? storyFrame)
     {
+        if (storyFrame is not null)
+        {
+            try { _storyThumbnail = CaptureThumbnail(storyFrame); }
+            catch (Exception error) { Report(error); }
+        }
         while (_pendingSaves.TryDequeue(out uint slot))
         {
             try
             {
                 byte[] variables = WriteGlobals(_ctx.VM.DumpVariables());
                 byte[] scene = ScenePersistence.Capture(_ctx, _ctx.World.MainProcess);
-                byte[] thumbnail = !_ctx.World.IsSystemMenu || _storyThumbnail is null
-                    ? CaptureThumbnail() : _storyThumbnail;
+                byte[] thumbnail = !_ctx.World.IsSystemMenu ? CaptureThumbnail(storyFrame)
+                    : _storyThumbnail ?? CaptureThumbnail();
                 using var payload = new MemoryStream();
                 using (var writer = new BinaryWriter(payload, Encoding.UTF8, leaveOpen: true))
                 {
-                    writer.Write(1);
+                    writer.Write(2);
                     writer.Write(_ctx.Profile.DesignResolution.Width);
                     writer.Write(_ctx.Profile.DesignResolution.Height);
                     WriteBytes(writer, variables);
                     WriteBytes(writer, scene);
                     WriteBytes(writer, thumbnail);
+                    WriteBacklog(writer);
                 }
                 _storage.Write(slot, payload.ToArray());
                 string directory = _storage.SlotDirectory(slot);
@@ -169,28 +184,111 @@ internal sealed class GameSaveManager
         }
     }
 
-    internal void CaptureStoryFrame() => _storyThumbnail = CaptureThumbnail();
+    internal void CaptureStoryFrame()
+    {
+        if (_ctx.Profile.SaveThumbnailSize.HasValue)
+            _captureWithoutText = true;
+        else
+            _storyThumbnail = CaptureThumbnail();
+    }
 
-    private byte[] CaptureThumbnail()
+    internal RenderTarget? RecordStoryThumbnail()
+    {
+        if (!_captureWithoutText && !(_pendingSaves.Count != 0
+            && !_ctx.World.IsSystemMenu && _ctx.Profile.SaveThumbnailSize.HasValue)) return null;
+        _captureWithoutText = false;
+        var target = _ctx.RenderContext.CreateSceneTarget();
+        try
+        {
+            _ctx.World.MainProcess.CaptureWithoutText(_ctx, target);
+            return target;
+        }
+        catch (Exception error)
+        {
+            GraphicsUtils.DisposeAfterIdle(_ctx.RenderContext.GraphicsDevice, target);
+            Report(error);
+            return null;
+        }
+    }
+
+    private byte[] CaptureThumbnail(RenderTarget? source = null)
     {
         var size = _ctx.RenderContext.RenderResolution;
         byte[] rgba = new byte[checked((int)(size.Width * size.Height * 4))];
-        _ctx.RenderContext.CopyRgba(rgba);
+        _ctx.RenderContext.CopyRgba(rgba, source);
         using Image<Rgba32> image = Image.LoadPixelData<Rgba32>(rgba, (int)size.Width, (int)size.Height);
-        image.Mutate(operation => operation.Resize(160, 90));
+        var render = _ctx.RenderContext;
+        var target = _ctx.Profile.SaveThumbnailSize ?? new DesignSizeU(160, 90);
+        if (_ctx.Profile.SaveThumbnailSize.HasValue)
+        {
+            int left = (int)MathF.Floor(render.ViewportLeft);
+            int top = (int)MathF.Floor(render.ViewportTop);
+            int right = (int)MathF.Ceiling(render.ViewportRight);
+            int bottom = (int)MathF.Ceiling(render.ViewportBottom);
+            image.Mutate(operation => operation.Crop(new SixLabors.ImageSharp.Rectangle(left, top, right - left, bottom - top)));
+        }
+        image.Mutate(operation => operation.Resize((int)target.Width, (int)target.Height));
         using var output = new MemoryStream();
         image.SaveAsPng(output);
         return output.ToArray();
     }
 
-    private void ReadCheckpoint(BinaryReader reader, out byte[] variables, out byte[] scene, out byte[] thumbnail)
+    internal Stream? OpenThumbnail(string path)
     {
-        if (reader.ReadInt32() != 1 || reader.ReadUInt32() != _ctx.Profile.DesignResolution.Width
+        if (_ctx.Profile.SaveThumbnailSize is not { } size
+            || SaveTextFileIO.ResolvePath(_storage.DirectoryPath, path) is not { } full
+            || !Path.GetFileName(full).Equals("thum.npf", StringComparison.OrdinalIgnoreCase)
+            || !uint.TryParse(Path.GetFileName(Path.GetDirectoryName(full)), out uint slot)
+            || full != Path.Combine(_storage.SlotDirectory(slot), "thum.npf")
+            || !File.Exists(full))
+            return null;
+
+        using var image = Image.Load<Rgba32>(full);
+        if (image.Width != size.Width || image.Height != size.Height)
+            image.Mutate(operation => operation.Resize((int)size.Width, (int)size.Height));
+        var stream = new MemoryStream();
+        image.SaveAsPng(stream);
+        stream.Position = 0;
+        return stream;
+    }
+
+    private void WriteBacklog(BinaryWriter writer)
+    {
+        var entries = _ctx.Builtins.Backlog;
+        writer.Write(entries.Count);
+        foreach (BacklogEntry entry in entries)
+        {
+            writer.Write(entry.Text);
+            writer.Write(entry.Voice is not null);
+            if (entry.Voice is { } voice)
+            {
+                writer.Write(voice.CharacterName);
+                writer.Write(voice.FileName);
+            }
+        }
+    }
+
+    private void ReadCheckpoint(BinaryReader reader, out byte[] variables, out byte[] scene, out byte[] thumbnail,
+        out BacklogEntry[] backlog)
+    {
+        int version = reader.ReadInt32();
+        if (version is not (1 or 2) || reader.ReadUInt32() != _ctx.Profile.DesignResolution.Width
             || reader.ReadUInt32() != _ctx.Profile.DesignResolution.Height)
             throw new InvalidDataException("The save format or game resolution has changed.");
         variables = ReadBytes(reader);
         scene = ReadBytes(reader);
         thumbnail = ReadBytes(reader);
+        int count = version == 2 ? reader.ReadInt32() : 0;
+        if (count < 0 || count > Builtins.MaximumBacklogEntries)
+            throw new InvalidDataException("The save contains an invalid backlog.");
+        backlog = new BacklogEntry[count];
+        for (int i = 0; i < count; i++)
+        {
+            string text = reader.ReadString();
+            VoiceSegment? voice = reader.ReadBoolean()
+                ? new VoiceSegment(reader.ReadString(), reader.ReadString(), NsVoiceAction.Play) : null;
+            backlog[i] = new BacklogEntry(text, voice);
+        }
         if (reader.BaseStream.Position != reader.BaseStream.Length)
             throw new InvalidDataException("The save contains unexpected data.");
     }

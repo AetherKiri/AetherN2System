@@ -79,6 +79,7 @@ public sealed class NsxModule
     public string Name { get; }
     internal string[] SourceScopes { get; set; } = [];
     internal IReadOnlyDictionary<string, NsxModule>? ScopedModules { get; set; }
+    internal Dictionary<CodeOffset, byte>? PartialCalls { get; private init; }
     public string[] Imports { get; }
     public DateTimeOffset SourceModificationTime { get; }
     public ReadOnlySpan<byte> Code => _codeSection;
@@ -262,6 +263,25 @@ public sealed class NsxModule
             );
         }
 
+        Dictionary<CodeOffset, byte>? partialCalls = null;
+        if (reader.Consume(NsxConstants.TableEndMarker.Length).SequenceEqual(NsxConstants.TableEndMarker)
+            && !reader.Unconsumed.IsEmpty)
+        {
+            const int recordSize = sizeof(int) + sizeof(byte);
+            if (reader.Unconsumed.Length % recordSize != 0)
+                throw new InvalidDataException("Invalid NSX call metadata.");
+            partialCalls = new Dictionary<CodeOffset, byte>(reader.Unconsumed.Length / recordSize);
+            while (!reader.Unconsumed.IsEmpty)
+            {
+                CodeOffset offset = reader.ReadInt32LE();
+                byte argumentCount = reader.ReadByte();
+                if ((uint)offset >= (uint)codeSectionBytes.Length
+                    || (Opcode)codeSectionBytes[offset] is not (Opcode.Call or Opcode.CallFar)
+                    || !partialCalls.TryAdd(offset, argumentCount))
+                    throw new InvalidDataException("Invalid NSX call metadata.");
+            }
+        }
+
         return new NsxModule(
             stream,
             name,
@@ -273,7 +293,7 @@ public sealed class NsxModule
             sourceMappings,
             codeSectionBytes,
             stringHeapOffset
-        );
+        ) { PartialCalls = partialCalls };
 
         static unsafe void assertMarker(ref TableHeader header, ReadOnlySpan<byte> expected)
         {
@@ -411,9 +431,9 @@ public abstract class CompiledDialogueBlockPart
 }
 
 [DebuggerDisplay("{SubroutineKind} '{SubroutineName}'")]
-public struct SubroutineRuntimeInfo
+public readonly struct SubroutineRuntimeInfo
 {
-    private string[]? _parameterNames;
+    internal readonly string[] ParameterNames;
     private readonly Dictionary<string, int>? _dialogueBlockMap;
 
     public readonly SubroutineKind SubroutineKind;
@@ -443,42 +463,15 @@ public struct SubroutineRuntimeInfo
             }
         }
 
-        _parameterNames = null;
+        int parameterCount = SubroutineKind == SubroutineKind.Function ? reader.ReadByte() : 0;
+        ParameterNames = parameterCount > 0 ? new string[parameterCount] : [];
+        for (int i = 0; i < parameterCount; i++)
+            ParameterNames[i] = reader.ReadLengthPrefixedUtf8String();
     }
 
-    internal readonly int LookupDialogueBlockIndex(string dialogueBlockName)
+    internal int LookupDialogueBlockIndex(string dialogueBlockName)
     {
         Debug.Assert(_dialogueBlockMap is not null);
         return _dialogueBlockMap[dialogueBlockName];
-    }
-
-    internal string[] GetParameterNames(byte[] rtiTable)
-    {
-        if (SubroutineKind != SubroutineKind.Function)
-        {
-            return [];
-        }
-
-        if (_parameterNames is null)
-        {
-            DecodeParameterNames(rtiTable);
-            Debug.Assert(_parameterNames is not null);
-        }
-
-        return _parameterNames;
-    }
-
-    private void DecodeParameterNames(byte[] rtiTable)
-    {
-        Debug.Assert(SubroutineKind == SubroutineKind.Function);
-        var reader = new BufferReader(rtiTable);
-        int parameterCount = reader.ReadByte();
-        _parameterNames = parameterCount > 0
-            ? new string[parameterCount]
-            : [];
-        for (int i = 0; i < parameterCount; i++)
-        {
-            _parameterNames[i] = reader.ReadLengthPrefixedUtf8String();
-        }
     }
 }

@@ -133,7 +133,10 @@ internal sealed class BuiltInFunctionDispatcher
                 ClearBacklog();
                 break;
             case BuiltInFunction.EnableBacklog:
-                EnableBacklog();
+                SetResult(ConstantValue.Boolean(_impl.IsBacklogEnabled));
+                break;
+            case BuiltInFunction.SetEnableBacklog:
+                _impl.SetBacklogEnabled(args.TakeBool());
                 break;
 
             case BuiltInFunction.CreateName:
@@ -559,11 +562,6 @@ internal sealed class BuiltInFunctionDispatcher
     private void XBOX360_IsAchieved(ref ArgConsumer args)
     {
         args.TakeInt();
-        _result = ConstantValue.True;
-    }
-
-    private void EnableBacklog()
-    {
         _result = ConstantValue.True;
     }
 

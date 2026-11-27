@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text.Json;
 using NitroSharp.Text;
-using SprintfNET;
+using NitroSharp.NsScript.VM;
 
 namespace NitroSharp;
 
@@ -34,6 +34,8 @@ public sealed class GameProfile
     public string? DialogueEncoding { get; init; }
     public string? DialogueVariables { get; init; }
     public string? NpaScheme { get; init; }
+    internal float? DefaultTextSpeed { get; init; }
+    internal DesignSizeU? SaveThumbnailSize { get; init; }
     internal string? WritableDirectory { get; set; }
     internal string? SaveDataDirectory { get; set; }
 
@@ -81,6 +83,9 @@ public sealed class GameProfile
             DialogueEncoding = getStringOpt("dev.dialogueEncoding"),
             DialogueVariables = getStringOpt("dev.dialogueVariables"),
             NpaScheme = getStringOpt("dev.npaScheme"),
+            DefaultTextSpeed = getUIntOpt("text.defaultSpeed"),
+            SaveThumbnailSize = getStringOpt("save.thumbnailSize") is { } thumbnailSize
+                ? Config.TryParseResolution<DesignPixel>(thumbnailSize) : null,
             IconPathPatterns = new IconPathPatterns
             {
                 WaitLine = new IconPathPattern(getString("icons.waitLine")),
@@ -169,7 +174,7 @@ public struct IconPathEnumerable(IconPathPattern pattern)
     {
         if (_index > pattern.IconCount) { return false; }
 
-        Current = StringFormatter.PrintF(pattern.FormatString, _index);
+        Current = PrintfFormatter.Format(pattern.FormatString, [_index], out _);
         _index++;
         return true;
     }

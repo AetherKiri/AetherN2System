@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using NitroSharp.Graphics;
+using NitroSharp.Graphics.Core;
 using NitroSharp.Text;
 
 namespace NitroSharp;
@@ -59,15 +60,22 @@ internal sealed partial class Process : Entity
         return ctx.RenderContext.CaptureScene(ctx, CollectionsMarshal.AsSpan(_renderList), rectangle);
     }
 
-    private void CollectRenderItems(GameContext ctx, int maximumPriority)
+    internal void CaptureWithoutText(GameContext ctx, RenderTarget target)
+    {
+        CollectRenderItems(ctx, int.MaxValue, hideText: true);
+        ctx.RenderContext.CaptureScene(ctx, CollectionsMarshal.AsSpan(_renderList), target);
+    }
+
+    private void CollectRenderItems(GameContext ctx, int maximumPriority, bool hideText = false)
     {
         _renderList.Clear();
 
-        bool eraseText = ctx.VM.SystemVariables.IsTextErased;
+        bool eraseText = hideText || ctx.VM.SystemVariables.IsTextErased;
         foreach (RenderItem renderItem in GetDescendants<RenderItem>())
         {
             if (renderItem.Priority > maximumPriority || renderItem.IsHidden
-                || (eraseText && renderItem.HidesWithText) || !AreMouseStatesVisible(renderItem))
+                || (eraseText && (renderItem.HidesWithText || renderItem is DialoguePage))
+                || !AreMouseStatesVisible(renderItem))
                 continue;
             _renderList.Add(renderItem);
         }

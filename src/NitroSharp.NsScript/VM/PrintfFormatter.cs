@@ -4,7 +4,7 @@ using System.Text;
 
 namespace NitroSharp.NsScript.VM;
 
-internal static class PrintfFormatter
+public static class PrintfFormatter
 {
     public static string Format(string format, object[] arguments, out bool invalid)
     {

@@ -180,6 +180,8 @@ public abstract class BuiltInFunctions
     public virtual void CreateBacklog(in EntityPath path, int priority) { NotImplemented(); }
     public virtual void SetBacklog(string text) { NotImplemented(); }
     public virtual void ClearBacklog() { NotImplemented(); }
+    public virtual bool IsBacklogEnabled => true;
+    public virtual void SetBacklogEnabled(bool enabled) { NotImplemented(); }
 
     public virtual Vector2 GetPosition(in EntityQuery query) => Vector2.Zero;
 

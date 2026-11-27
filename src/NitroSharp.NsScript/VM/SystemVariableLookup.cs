@@ -14,6 +14,7 @@ public sealed class SystemVariableLookup
     private int _lButtonDown;
     private int _returnKeyDown;
     private int _escapeKeyDown;
+    private int _backlogKeyDown;
     private int _x360ButtonStartDown;
     private int _x360ButtonADown;
     private int _x360ButtonBDown;
@@ -74,6 +75,7 @@ public sealed class SystemVariableLookup
         _lButtonDown = Lookup("SYSTEM_l_button_down");
         _returnKeyDown = Lookup("SYSTEM_keydown_enter");
         _escapeKeyDown = Lookup("SYSTEM_keydown_esc");
+        _backlogKeyDown = Lookup("SYSTEM_keydown_b");
         _x360ButtonStartDown = Lookup("SYSTEM_XBOX360_button_start_down");
         _x360ButtonADown = Lookup("SYSTEM_XBOX360_button_a_down");
         _x360ButtonBDown = Lookup("SYSTEM_XBOX360_button_b_down");
@@ -154,6 +156,7 @@ public sealed class SystemVariableLookup
     public ref ConstantValue LeftButtonDown => ref Var(_lButtonDown);
     public ref ConstantValue ReturnKeyDown => ref Var(_returnKeyDown);
     public ref ConstantValue EscapeKeyDown => ref Var(_escapeKeyDown);
+    public ref ConstantValue BacklogKeyDown => ref Var(_backlogKeyDown);
     public ref ConstantValue TextErase => ref Var(_textErase);
 
     public ref ConstantValue X360StartButtonDown => ref Var(_x360ButtonStartDown);
@@ -183,12 +186,12 @@ public sealed class SystemVariableLookup
             : ref _missingVariable;
     }
 
-    public ref ConstantValue BacklogEnable => ref _vm.GetVariable(_backlogEnable);
-    public ref ConstantValue BacklogRowMax => ref _vm.GetVariable(_backlogRowMax);
-    public ref ConstantValue BacklogRowInterval => ref _vm.GetVariable(_backlogRowInterval);
-    public ref ConstantValue BacklogPositionX => ref _vm.GetVariable(_backlogPositionX);
-    public ref ConstantValue BacklogPositionY => ref _vm.GetVariable(_backlogPositionY);
-    public ref ConstantValue BacklogCharacterWidth => ref _vm.GetVariable(_backlogCharacterWidth);
+    public ref ConstantValue BacklogEnable => ref Var(_backlogEnable);
+    public ref ConstantValue BacklogRowMax => ref Var(_backlogRowMax);
+    public ref ConstantValue BacklogRowInterval => ref Var(_backlogRowInterval);
+    public ref ConstantValue BacklogPositionX => ref Var(_backlogPositionX);
+    public ref ConstantValue BacklogPositionY => ref Var(_backlogPositionY);
+    public ref ConstantValue BacklogCharacterWidth => ref Var(_backlogCharacterWidth);
 
     public ref ConstantValue PositionXTextIcon => ref _vm.GetVariable(_positionXTextIcon);
     public ref ConstantValue PositionYTextIcon => ref _vm.GetVariable(_positionYTextIcon);
