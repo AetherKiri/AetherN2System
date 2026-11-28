@@ -3,6 +3,7 @@
 <ItemGroup>
   <Compile Remove="media_smoke/**/*.cs" />
   <Compile Remove="video_smoke/**/*.cs" />
+  <Compile Remove="archives/**/*.cs" />
   <ProjectReference Include="../../src/NitroSharp.Rebuild/NitroSharp.Rebuild.csproj" />
 </ItemGroup>
 </Project>
