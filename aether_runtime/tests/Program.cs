@@ -48,6 +48,37 @@ if (source.IsPlaying)
 Console.WriteLine("OpenAL EOF completed without remaining playback.");
 source.Stop();
 
+// Default output following: a simulated ALC_SOFT_system_events notification
+// must reopen the device exactly once, and streaming must continue across it.
+if (device.FollowsDefaultOutput)
+{
+    if (device.FollowDefaultOutput())
+        throw new Exception("OpenAL reopened without a default output change.");
+    await using var follower = device.CreateAudioSource(4096, 4);
+    var silence = new Pipe(
+        new PipeOptions(pauseWriterThreshold: long.MaxValue, resumeWriterThreshold: long.MaxValue / 2)
+    );
+    follower.Play(silence.Reader);
+    await silence.Writer.WriteAsync(new byte[44100 * 4]);
+    await Task.Delay(150);
+    double beforeReopen = follower.SecondsElapsed;
+    OpenALAudioDevice.SimulateDefaultOutputChangeForTesting();
+    if (!device.FollowDefaultOutput())
+        throw new Exception("OpenAL did not reopen after a default output change.");
+    if (device.FollowDefaultOutput())
+        throw new Exception("OpenAL reopened twice for one default output change.");
+    await Task.Delay(150);
+    if (!follower.IsPlaying || follower.SecondsElapsed <= beforeReopen)
+        throw new Exception("OpenAL playback did not continue after reopening.");
+    Console.WriteLine("OpenAL followed a default output change and kept playing.");
+    await silence.Writer.CompleteAsync();
+    follower.Stop();
+}
+else
+{
+    Console.WriteLine("OpenAL reports no default output changes; follow check skipped.");
+}
+
 if (args.Length > 2)
 {
     NativeLibrary.SetDllImportResolver(

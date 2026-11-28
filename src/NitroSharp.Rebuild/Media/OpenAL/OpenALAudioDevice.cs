@@ -2,6 +2,7 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.IO.Pipelines;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -12,12 +13,26 @@ namespace NitroSharp.Media;
 
 internal sealed class OpenALAudioDevice : AudioDevice
 {
+    // ALC_SOFT_system_events and ALC_SOFT_reopen_device values from OpenAL
+    // Soft's alext.h. OpenAL-CS has no bindings for these extensions, so their
+    // functions are loaded through alcGetProcAddress.
+    private const int ALC_PLAYBACK_DEVICE_SOFT = 0x19D4;
+    private const int ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT = 0x19D6;
+    private const int ALC_EVENT_SUPPORTED_SOFT = 0x19D9;
+
+    // Bumped from an OpenAL-internal thread whenever the default playback
+    // output changes; each device remembers the last value it acted on.
+    private static int s_defaultOutputGeneration;
+    private static bool? s_defaultOutputEvents;
+
     internal static readonly object Sync = new();
     private readonly nint _device;
     private readonly nint _context;
     private readonly List<OpenALAudioSource> _sources = [];
+    private readonly unsafe delegate* unmanaged[Cdecl]<nint, byte*, int*, byte> _reopenDevice;
+    private int _seenDefaultOutputGeneration;
 
-    public OpenALAudioDevice(in AudioParameters parameters)
+    public unsafe OpenALAudioDevice(in AudioParameters parameters)
         : base(parameters)
     {
         lock (Sync)
@@ -34,10 +49,97 @@ internal sealed class OpenALAudioDevice : AudioDevice
                 throw new InvalidOperationException("OpenAL could not create an audio context.");
             }
             Activate();
+            if (EnableDefaultOutputEvents())
+            {
+                _reopenDevice = (delegate* unmanaged[Cdecl]<nint, byte*, int*, byte>)
+                    alcGetProcAddress(_device, "alcReopenDeviceSOFT");
+                _seenDefaultOutputGeneration = Volatile.Read(ref s_defaultOutputGeneration);
+            }
         }
     }
 
     internal void Activate() => alcMakeContextCurrent(_context);
+
+    /// <summary>
+    /// True when the device can follow changes of the system default output.
+    /// </summary>
+    internal unsafe bool FollowsDefaultOutput => _reopenDevice != null;
+
+    /// <summary>
+    /// Reopens the device on the current system default output when it changed
+    /// since the previous call, e.g. when headphones connect after the game
+    /// started. Reopening keeps the context, sources and queued buffers. Call
+    /// it periodically from the host; returns true when the device moved.
+    /// </summary>
+    internal unsafe bool FollowDefaultOutput()
+    {
+        if (_reopenDevice == null)
+            return false;
+        int generation = Volatile.Read(ref s_defaultOutputGeneration);
+        if (generation == _seenDefaultOutputGeneration)
+            return false;
+        _seenDefaultOutputGeneration = generation;
+        lock (Sync)
+            return _reopenDevice(_device, null, null) != 0;
+    }
+
+    /// <summary>Raises a default output change as OpenAL would. Tests only.</summary>
+    internal static void SimulateDefaultOutputChangeForTesting() =>
+        Interlocked.Increment(ref s_defaultOutputGeneration);
+
+    // Registers the process-wide event callback once. Called under Sync.
+    private static unsafe bool EnableDefaultOutputEvents()
+    {
+        if (s_defaultOutputEvents is bool enabled)
+            return enabled;
+        s_defaultOutputEvents = false;
+        var isSupported = (delegate* unmanaged[Cdecl]<int, int, int>)
+            alcGetProcAddress(0, "alcEventIsSupportedSOFT");
+        var control = (delegate* unmanaged[Cdecl]<int, int*, byte, byte>)
+            alcGetProcAddress(0, "alcEventControlSOFT");
+        var setCallback = (delegate* unmanaged[Cdecl]<
+            delegate* unmanaged[Cdecl]<int, int, nint, int, nint, nint, void>,
+            nint,
+            void>)
+            alcGetProcAddress(0, "alcEventCallbackSOFT");
+        // Missing on older OpenAL Soft and on Apple's OpenAL framework, and
+        // unsupported by backends without device notifications such as iOS.
+        if (isSupported == null || control == null || setCallback == null)
+            return false;
+        if (
+            isSupported(ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT, ALC_PLAYBACK_DEVICE_SOFT)
+            != ALC_EVENT_SUPPORTED_SOFT
+        )
+            return false;
+        setCallback(&OnSystemEvent, 0);
+        int eventType = ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT;
+        if (control(1, &eventType, 1) == 0)
+        {
+            setCallback(null, 0);
+            return false;
+        }
+        s_defaultOutputEvents = true;
+        return true;
+    }
+
+    // Runs on an OpenAL-internal thread: only record the change here and let
+    // the host tick reopen the device.
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnSystemEvent(
+        int eventType,
+        int deviceType,
+        nint device,
+        int length,
+        nint message,
+        nint userParam
+    )
+    {
+        if (
+            deviceType == ALC_PLAYBACK_DEVICE_SOFT
+            && eventType == ALC_EVENT_TYPE_DEFAULT_DEVICE_CHANGED_SOFT
+        )
+            Interlocked.Increment(ref s_defaultOutputGeneration);
+    }
 
     public override AudioBackend Backend => AudioBackend.OpenAL;
 
