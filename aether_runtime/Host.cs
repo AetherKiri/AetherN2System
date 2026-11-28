@@ -385,6 +385,10 @@ internal static unsafe class Exports
                     throw new ArgumentOutOfRangeException(nameof(delta));
                 if (i.Failed)
                     throw new InvalidOperationException("Instance is in a failed state.");
+                // Follow the system default output even while paused, so audio
+                // resumes on the device the user switched to.
+                if (i.Context.AudioContext.Device is NitroSharp.Media.OpenALAudioDevice device)
+                    device.FollowDefaultOutput();
                 if (i.Paused || i.Context.ShutdownSignal.IsCancellationRequested)
                     return;
                 i.Context.Step((float)(delta * 1000));
